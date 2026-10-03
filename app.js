@@ -4,6 +4,10 @@ import { firebaseConfig } from './config.js';
 
 const STREET_STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+const CREDITS = {
+  street: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://www.openmaptiles.org/">OpenMapTiles</a> · <a href="https://openfreemap.org">OpenFreeMap</a>',
+  satellite: '&copy; Esri, Maxar, Earthstar Geographics',
+};
 const GEOCODER = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer';
 const WORLD = [[85, -180], [85, 180], [-85, 180], [-85, -180]];
 
@@ -73,14 +77,10 @@ function toast(message, duration = 3000) {
 // Map
 
 const map = L.map('map', { zoomControl: false, attributionControl: false, renderer: L.canvas(), minZoom: 12, maxZoom: 19 });
-L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
 
-const street = L.maplibreGL({
-  style: STREET_STYLE,
-  attributionControl: { customAttribution: '<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
-});
+const street = L.maplibreGL({ style: STREET_STYLE });
 const satellite = L.layerGroup([
-  L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19, attribution: '&copy; Esri, Maxar, Earthstar Geographics' }),
+  L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
   L.tileLayer(`${ESRI}/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
 ]);
 let base = street.addTo(map);
@@ -96,6 +96,7 @@ function labelBasemap() {
   const label = t(base === street ? 'satellite' : 'mapView');
   $('basemap').setAttribute('aria-label', label);
   $('basemap').title = label;
+  $('credits').innerHTML = CREDITS[base === street ? 'street' : 'satellite'];
 }
 
 async function loadContext() {
