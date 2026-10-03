@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=2';
-import { SHEET_URL } from './config.js?v=2';
+import { strings } from './strings.js?v=3';
+import { SHEET_URL } from './config.js?v=3';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -317,14 +317,21 @@ $('types').addEventListener('change', (e) => setType(e.target.value));
 phone.addEventListener('change', applyStrings);
 $('lang').addEventListener('click', toggleLang);
 $('welcome-lang').addEventListener('click', toggleLang);
+// Escape closes the welcome screen and a click can land outside it; both bring a reminder instead.
 $('welcome').addEventListener('close', () => {
-  if (!document.querySelector('input[name="type"]:checked')) $('welcome').showModal();
+  if (document.querySelector('input[name="type"]:checked')) return;
+  $('welcome').showModal();
+  $('remind').hidden = false;
 });
 $('welcome').addEventListener('click', (e) => {
   const choice = e.target.closest('[value]');
-  if (!choice) return;
-  setType(choice.value);
-  $('welcome').close();
+  const box = $('welcome').getBoundingClientRect();
+  if (choice) {
+    setType(choice.value);
+    $('welcome').close();
+  } else if (e.target === $('welcome') && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom)) {
+    $('remind').hidden = false;
+  }
 });
 
 $('search').addEventListener('input', (e) => {
