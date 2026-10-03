@@ -1,5 +1,6 @@
 # Publishes the site, with a fresh copy of the public suggestions in data/suggestions.json so the map
 # can show its dots without waiting on the Google Sheet. Runs on every push and about every 10 minutes.
+# GitHub pauses scheduled runs after 60 days without a commit, so the job commits when one is due.
 name: Publish
 
 on:
@@ -10,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -26,6 +27,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
 
       # The sheet is slow at random, so try it a few times. If it never answers, keep the copy
       # already on the site rather than publishing nothing.
@@ -56,3 +59,17 @@ jobs:
       - if: steps.copy.outputs.unchanged != 'true'
         id: deployment
         uses: actions/deploy-pages@v5
+
+      # An empty commit once the last one is 45 days old keeps the schedule from being paused.
+      - name: Keep the schedule running
+        if: github.event_name == 'schedule'
+        run: |
+          age=$(( ($(date +%s) - $(git log -1 --format=%ct)) / 86400 ))
+          if [ "$age" -ge 45 ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit --allow-empty -m 'Keep the scheduled publish running'
+            git push || echo 'Push failed; the next run will try again.'
+          else
+            echo "Last commit is $age days old; nothing to do."
+          fi

@@ -35,7 +35,8 @@ version; the URL stays the same.
 10 minutes. Each run copies the public suggestions from the sheet into
 `data/suggestions.json`, so the map shows its dots at once and then refreshes
 them from the sheet. GitHub pauses scheduled runs after 60 days without a
-commit; re-enable the workflow under Actions if that happens. Pages must be set
+commit, so the workflow adds an empty commit whenever the last one is 45 days
+old. If the schedule is ever paused anyway, re-enable it under Actions. Pages must be set
 to build from GitHub Actions, not from a branch.
 
 ## Releasing a change
