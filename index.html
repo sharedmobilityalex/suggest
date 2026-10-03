@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Mark the spot · City of Alexandria</title>
+<title>Suggest a location · City of Alexandria</title>
 <meta name="description" content="Suggest a location for a Capital Bikeshare station or a bike and scooter parking corral in Alexandria, Virginia.">
 <link rel="icon" href="assets/favicon.svg">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -46,7 +47,6 @@
       <button type="button" class="btn" id="cancel" data-s="cancel"></button>
       <button type="button" class="btn primary" id="submit" data-s="submit" disabled></button>
     </div>
-    <p class="privacy" data-s="privacy"></p>
     <ul class="legend">
       <li><span class="swatch existing-station"></span><span data-s="existingStation"></span></li>
       <li><span class="swatch existing-corral"></span><span data-s="existingCorral"></span></li>
@@ -64,6 +64,9 @@
       </button>
       <button type="button" id="zoom-in" data-s-aria="zoomIn">+</button>
       <button type="button" id="zoom-out" data-s-aria="zoomOut">−</button>
+      <button type="button" id="basemap">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 4l8 4.5-8 4.5-8-4.5z"/><path d="M4 13l8 4.5 8-4.5"/></svg>
+      </button>
     </div>
     <button type="button" class="btn primary cta" id="cta"></button>
     <p class="toast" id="toast" role="status"></p>
@@ -79,11 +82,14 @@
   </ol>
   <p data-s="helpVote"></p>
   <p data-s="helpPrivacy"></p>
-  <p><span data-s="helpLinks"></span> <a href="https://www.alexandriava.gov/Bikesharing">Capital Bikeshare</a> · <a href="https://www.alexandriava.gov/DocklessMobility" data-s="dockless"></a></p>
+  <p data-s="helpLinks"></p>
+  <p class="links"><a href="https://www.alexandriava.gov/Bikesharing">Capital Bikeshare</a><a href="https://www.alexandriava.gov/DocklessMobility" data-s="dockless"></a></p>
   <button type="button" class="btn" id="help-close" data-s="close"></button>
 </dialog>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/dist/leaflet-maplibre-gl.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

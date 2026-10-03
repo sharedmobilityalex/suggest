@@ -1,4 +1,4 @@
-# Mark the spot
+# Suggest a location
 
 A small map where Alexandria residents can suggest where a Capital Bikeshare
 station or a bike and scooter parking corral should go. One page, works on
@@ -21,6 +21,12 @@ demo mode and keeps suggestions in memory.
    the staff member's user id.
 3. **Context data.** `python3 tools/bake_context.py` refreshes the stations,
    corrals and City boundary in `data/context.json`.
+
+## Basemaps
+
+Streets come from OpenFreeMap's Positron style (vector, no key); the satellite
+view is Esri World Imagery with Esri's transportation labels. Neither needs an
+account.
 
 ## URL parameters
 

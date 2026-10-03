@@ -1,9 +1,9 @@
 import { strings } from './strings.js';
 import { createStore } from './store.js';
-import { firebaseConfig, cartoKey } from './config.js';
+import { firebaseConfig } from './config.js';
 
-const TILES = 'https://{s}.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png';
-const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const STREET_STYLE = 'https://tiles.openfreemap.org/styles/positron';
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
 const GEOCODER = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer';
 const WORLD = [[85, -180], [85, 180], [-85, 180], [-85, -180]];
 
@@ -56,6 +56,7 @@ function applyStrings() {
   const other = state.lang === 'en' ? 'es' : 'en';
   $('lang').textContent = phone.matches ? other.toUpperCase() : { es: 'Español', en: 'English' }[other];
   $('lang').lang = other;
+  labelBasemap();
   updateNear();
 }
 
@@ -72,7 +73,29 @@ function toast(message, duration = 3000) {
 
 const map = L.map('map', { zoomControl: false, attributionControl: false, renderer: L.canvas(), minZoom: 12, maxZoom: 19 });
 L.control.attribution({ prefix: false, position: 'bottomleft' }).addTo(map);
-L.tileLayer(cartoKey ? `${TILES}?key=${cartoKey}` : TILES, { attribution: ATTRIBUTION, subdomains: 'abcd', maxZoom: 19 }).addTo(map);
+
+const street = L.maplibreGL({
+  style: STREET_STYLE,
+  attribution: '&copy; <a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+});
+const satellite = L.layerGroup([
+  L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19, attribution: '&copy; Esri, Maxar, Earthstar Geographics' }),
+  L.tileLayer(`${ESRI}/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
+]);
+let base = street.addTo(map);
+
+function toggleBasemap() {
+  map.removeLayer(base);
+  base = base === street ? satellite : street;
+  base.addTo(map);
+  labelBasemap();
+}
+
+function labelBasemap() {
+  const label = t(base === street ? 'satellite' : 'mapView');
+  $('basemap').setAttribute('aria-label', label);
+  $('basemap').title = label;
+}
 
 async function loadContext() {
   const ctx = await fetch('data/context.json').then((r) => r.json());
@@ -274,6 +297,7 @@ $('submit').addEventListener('click', submit);
 $('locate').addEventListener('click', () => map.locate({ setView: true, maxZoom: 17 }));
 $('zoom-in').addEventListener('click', () => map.zoomIn());
 $('zoom-out').addEventListener('click', () => map.zoomOut());
+$('basemap').addEventListener('click', toggleBasemap);
 $('help').addEventListener('click', () => $('help-dialog').showModal());
 $('help-close').addEventListener('click', () => $('help-dialog').close());
 
