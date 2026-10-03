@@ -1,3 +1,3 @@
-// Web app settings from the Firebase console (Project settings → Your apps).
-// Leave this null to run the page without a backend.
-export const firebaseConfig = null;
+// Web app URL of the deployed Apps Script (see tools/sheet.gs and the README).
+// Leave this empty to run the page as a demo that saves nothing.
+export const SHEET_URL = '';

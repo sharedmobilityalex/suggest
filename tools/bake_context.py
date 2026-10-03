@@ -26,7 +26,7 @@ def outer_ring(geometry):
 
 
 def centroid(ring):
-    return [round(sum(p[1] for p in ring) / len(ring), 6), round(sum(p[0] for p in ring) / len(ring), 6)]
+    return [round(sum(p[0] for p in ring) / len(ring), 6), round(sum(p[1] for p in ring) / len(ring), 6)]
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
     south, north = min(p[1] for p in ring), max(p[1] for p in ring)
 
     stations = [
-        [round(s["lat"], 6), round(s["lon"], 6), s["name"]]
+        [round(s["lon"], 6), round(s["lat"], 6), s["name"]]
         for s in fetch(STATIONS)["data"]["stations"]
         if south - MARGIN <= s["lat"] <= north + MARGIN and west - MARGIN <= s["lon"] <= east + MARGIN
     ]
@@ -46,7 +46,7 @@ def main():
 
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps({
-        "boundary": [[round(p[1], 6), round(p[0], 6)] for p in ring],
+        "boundary": [[round(p[0], 6), round(p[1], 6)] for p in ring],
         "bbox": [round(v, 4) for v in (west, south, east, north)],
         "stations": sorted(stations, key=lambda s: s[2]),
         "corrals": sorted(corrals, key=lambda c: c[2]),

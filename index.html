@@ -6,7 +6,6 @@
 <title>Suggest a location · City of Alexandria</title>
 <meta name="description" content="Suggest a location for a Capital Bikeshare station or a bike and scooter parking corral in Alexandria, Virginia.">
 <link rel="icon" href="assets/favicon.svg">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -16,7 +15,7 @@
   <img class="lockup" src="assets/tes-logo.png" alt="City of Alexandria, Transportation and Environmental Services">
   <h1 data-s="title"></h1>
   <button type="button" class="bar-btn" id="lang"></button>
-  <button type="button" class="bar-btn" id="help" data-s-aria="help">?</button>
+  <button type="button" class="bar-btn" id="help" data-s-label="help">?</button>
 </header>
 
 <main id="main">
@@ -27,7 +26,7 @@
       <label><input type="radio" name="type" value="corral"><span class="swatch corral"></span><span data-s="corral" data-s-phone="corralShort"></span></label>
     </div>
     <div class="search">
-      <input type="search" id="search" autocomplete="off" data-s-ph="search" data-s-aria="search">
+      <input type="search" id="search" autocomplete="off" data-s="search" data-s-label="search">
       <ul id="results" hidden></ul>
     </div>
   </div>
@@ -38,7 +37,7 @@
       <p class="hint" id="hint"></p>
       <button type="button" class="btn" id="drop"></button>
     </div>
-    <p class="near" id="near" hidden></p>
+    <p class="near" id="near"></p>
     <div class="step">
       <h2 data-s="step3"></h2>
       <textarea id="note" maxlength="200" rows="3"></textarea>
@@ -59,11 +58,11 @@
     <div id="map"></div>
     <div class="crosshair"></div>
     <div class="rail">
-      <button type="button" id="locate" data-s-aria="locate">
+      <button type="button" id="locate" data-s-label="locate">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
       </button>
-      <button type="button" id="zoom-in" data-s-aria="zoomIn">+</button>
-      <button type="button" id="zoom-out" data-s-aria="zoomOut">−</button>
+      <button type="button" id="zoom-in" data-s-label="zoomIn">+</button>
+      <button type="button" id="zoom-out" data-s-label="zoomOut">−</button>
       <button type="button" id="basemap">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 4l8 4.5-8 4.5-8-4.5z"/><path d="M4 13l8 4.5 8-4.5"/></svg>
       </button>
@@ -88,9 +87,7 @@
   <button type="button" class="btn" id="help-close" data-s="close"></button>
 </dialog>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/dist/leaflet-maplibre-gl.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

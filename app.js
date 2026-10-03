@@ -1,15 +1,14 @@
 import { strings } from './strings.js';
-import { createStore } from './store.js';
-import { firebaseConfig } from './config.js';
+import { SHEET_URL } from './config.js';
 
-const STREET_STYLE = 'https://tiles.openfreemap.org/styles/positron';
+const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+const GEOCODER = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer';
 const CREDITS = {
   street: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://www.openmaptiles.org/">OpenMapTiles</a> · <a href="https://openfreemap.org">OpenFreeMap</a>',
   satellite: '&copy; Esri, Maxar, Earthstar Geographics',
 };
-const GEOCODER = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer';
-const WORLD = [[85, -180], [85, 180], [-85, 180], [-85, -180]];
+const PIN = '<svg viewBox="0 0 30 40"><path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25C30 6.7 23.3 0 15 0z"/><circle cx="15" cy="15" r="6" fill="#fff"/></svg>';
 
 const params = new URLSearchParams(location.search);
 const touch = matchMedia('(pointer: coarse)').matches;
@@ -21,12 +20,13 @@ const state = {
   type: pick(params.get('type'), ['station', 'corral'], 'station'),
   locked: ['station', 'corral'].includes(params.get('type')),
   source: pick(params.get('src'), ['qr', 'web'], 'direct'),
+  satellite: false,
   pin: null,
   voted: new Set(remember('voted') || []),
 };
+const device = remember('device') || remember('device', crypto.randomUUID());
 const dots = new Map();
 let context;
-let store;
 
 function pick(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
@@ -37,9 +37,15 @@ function remember(key, value) {
   try {
     if (value === undefined) return JSON.parse(localStorage.getItem(key));
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    return null;
-  }
+  } catch {}
+  return value ?? null;
+}
+
+// The Google Sheet behind the map (see tools/sheet.gs). Without a URL the page runs as a demo.
+async function api(body) {
+  if (!SHEET_URL) return body ? { id: String(Date.now()), votes: 1 } : [];
+  const response = await fetch(SHEET_URL, body && { method: 'POST', body: JSON.stringify({ ...body, device }) });
+  return response.json();
 }
 
 // Text
@@ -48,11 +54,15 @@ function t(key, vars = {}) {
   return strings[state.lang][key].replace(/\{(\w+)\}/g, (_, name) => vars[name]);
 }
 
+function label(el, text) {
+  el.title = text;
+  el.setAttribute('aria-label', text);
+}
+
 function applyStrings() {
   document.documentElement.lang = state.lang;
-  for (const el of document.querySelectorAll('[data-s]')) el.textContent = t(el.dataset.s);
-  for (const el of document.querySelectorAll('[data-s-ph]')) el.placeholder = t(el.dataset.sPh);
-  for (const el of document.querySelectorAll('[data-s-aria]')) el.setAttribute('aria-label', t(el.dataset.sAria));
+  for (const el of document.querySelectorAll('[data-s]')) el[el.matches('input') ? 'placeholder' : 'textContent'] = t(el.dataset.s);
+  for (const el of document.querySelectorAll('[data-s-label]')) label(el, t(el.dataset.sLabel));
   if (phone.matches) for (const el of document.querySelectorAll('[data-s-phone]')) el.textContent = t(el.dataset.sPhone);
   $('tagline').textContent = t(state.type === 'station' ? 'taglineStation' : 'taglineCorral');
   $('hint').textContent = t(touch ? 'hintTouch' : 'hintMouse');
@@ -76,54 +86,56 @@ function toast(message, duration = 3000) {
 
 // Map
 
-const map = L.map('map', { zoomControl: false, attributionControl: false, renderer: L.canvas(), minZoom: 12, maxZoom: 19 });
-
-const street = L.maplibreGL({ style: STREET_STYLE });
-const satellite = L.layerGroup([
-  L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
-  L.tileLayer(`${ESRI}/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
-]);
-let base = street.addTo(map);
+const map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-77.09, 38.82], zoom: 12, minZoom: 12, maxZoom: 19, attributionControl: false });
+const tip = new maplibregl.Popup({ closeButton: false, offset: 8, className: 'tip' });
 
 function toggleBasemap() {
-  map.removeLayer(base);
-  base = base === street ? satellite : street;
-  base.addTo(map);
+  if (!map.getLayer('imagery')) return;
+  state.satellite = !state.satellite;
+  for (const id of ['imagery', 'labels']) map.setLayoutProperty(id, 'visibility', state.satellite ? 'visible' : 'none');
   labelBasemap();
 }
 
 function labelBasemap() {
-  const label = t(base === street ? 'satellite' : 'mapView');
-  $('basemap').setAttribute('aria-label', label);
-  $('basemap').title = label;
-  $('credits').innerHTML = CREDITS[base === street ? 'street' : 'satellite'];
+  label($('basemap'), t(state.satellite ? 'mapView' : 'satellite'));
+  $('credits').innerHTML = CREDITS[state.satellite ? 'satellite' : 'street'];
 }
 
 async function loadContext() {
-  const ctx = await fetch('data/context.json').then((r) => r.json());
-  const marker = { radius: 4, color: '#fff', weight: 1, fillOpacity: 1, bubblingMouseEvents: false };
+  const [ctx] = await Promise.all([fetch('data/context.json').then((r) => r.json()), new Promise((done) => map.once('style.load', done))]);
+  const raster = (path) => ({ type: 'raster', tiles: [`${ESRI}/${path}/MapServer/tile/{z}/{y}/{x}`], tileSize: 256, maxzoom: 19 });
+  const place = (lng, lat, kind, name) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: { kind, name } });
+  const places = [
+    ...ctx.stations.map(([lng, lat, name]) => place(lng, lat, 'station', name)),
+    ...ctx.corrals.map(([lng, lat, number, street]) => place(lng, lat, 'corral', `Corral ${number} · ${street}`)),
+  ];
 
-  L.polygon([WORLD, ctx.boundary], { stroke: false, fillColor: '#1d1d1b', fillOpacity: 0.08, interactive: false }).addTo(map);
-  L.polygon(ctx.boundary, { fill: false, color: '#0b9cd8', weight: 2, dashArray: '6 6', interactive: false }).addTo(map);
-  for (const [lat, lng, name] of ctx.stations) {
-    L.circleMarker([lat, lng], { ...marker, fillColor: '#8d8c82' }).bindTooltip(name).addTo(map);
-  }
-  for (const [lat, lng, label, street] of ctx.corrals) {
-    L.circleMarker([lat, lng], { ...marker, fillColor: '#0d9488' }).bindTooltip(`Corral ${label} · ${street}`).addTo(map);
-  }
+  map.addSource('imagery', raster('World_Imagery'));
+  map.addSource('labels', raster('Reference/World_Transportation'));
+  map.addSource('city', { type: 'geojson', data: { type: 'Polygon', coordinates: [[[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]], ctx.boundary] } });
+  map.addSource('places', { type: 'geojson', data: { type: 'FeatureCollection', features: places } });
+  map.addLayer({ id: 'imagery', type: 'raster', source: 'imagery', layout: { visibility: 'none' } });
+  map.addLayer({ id: 'labels', type: 'raster', source: 'labels', layout: { visibility: 'none' } });
+  map.addLayer({ id: 'mask', type: 'fill', source: 'city', paint: { 'fill-color': '#1d1d1b', 'fill-opacity': 0.08 } });
+  map.addLayer({ id: 'boundary', type: 'line', source: 'city', paint: { 'line-color': '#0b9cd8', 'line-width': 2, 'line-dasharray': [3, 3] } });
+  map.addLayer({ id: 'places', type: 'circle', source: 'places', paint: { 'circle-radius': 4, 'circle-color': ['match', ['get', 'kind'], 'corral', '#0d9488', '#8d8c82'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
 
-  const bounds = L.latLngBounds(ctx.boundary);
-  map.fitBounds(bounds, { padding: [8, 8] });
-  map.setMaxBounds(bounds.pad(0.5));
+  const [w, s, e, n] = ctx.bbox;
+  map.fitBounds(ctx.bbox, { padding: 8, animate: false });
+  map.setMaxBounds([w - (e - w) / 2, s - (n - s) / 2, e + (e - w) / 2, n + (n - s) / 2]);
   return ctx;
 }
 
-function insideCity(lat, lng) {
+function showTip(feature) {
+  tip.setLngLat(feature.geometry.coordinates).setText(feature.properties.name).addTo(map);
+}
+
+function insideCity(lng, lat) {
   const ring = context.boundary;
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [yi, xi] = ring[i];
-    const [yj, xj] = ring[j];
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
     if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
@@ -131,82 +143,50 @@ function insideCity(lat, lng) {
 
 // The pin being placed
 
-function pinIcon() {
-  return L.divIcon({
-    className: `pin ${state.type}`,
-    iconSize: [30, 40],
-    iconAnchor: [15, 40],
-    html: '<svg viewBox="0 0 30 40"><path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25C30 6.7 23.3 0 15 0z"/><circle cx="15" cy="15" r="6" fill="#fff"/></svg>',
-  });
-}
-
-function placePin(latlng) {
-  if (!insideCity(latlng.lat, latlng.lng)) {
-    toast(t('outside'));
-    return;
-  }
-  if (state.pin) {
-    state.pin.setLatLng(latlng);
-  } else {
-    state.pin = L.marker(latlng, { icon: pinIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
-    state.pin.on('dragend', pinMoved);
-    $('main').classList.add('pinned');
-    $('panel').classList.add('open');
-    $('submit').disabled = false;
+function placePin(lngLat) {
+  if (!insideCity(lngLat.lng, lngLat.lat)) return toast(t('outside'));
+  if (!state.pin) {
+    const el = document.createElement('div');
+    el.className = 'pin';
+    el.innerHTML = PIN;
+    state.pin = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' }).setLngLat(lngLat).addTo(map);
+    state.pin.on('dragend', updateNear);
+    setPinned(true);
     if (phone.matches) map.panBy([0, $('panel').offsetHeight / 2]);
   }
+  state.pin.setLngLat(lngLat).getElement().classList.toggle('corral', state.type === 'corral');
   updateNear();
 }
 
-function pinMoved() {
-  const { lat, lng } = state.pin.getLatLng();
-  $('submit').disabled = !insideCity(lat, lng);
-  if ($('submit').disabled) toast(t('outside'));
-  updateNear();
+function setPinned(on) {
+  $('main').classList.toggle('pinned', on);
+  $('submit').disabled = !on;
 }
 
 function clearPin() {
   state.pin?.remove();
   state.pin = null;
   $('note').value = '';
-  $('submit').disabled = true;
-  $('main').classList.remove('pinned');
-  $('panel').classList.remove('open');
-  updateNear();
+  setPinned(false);
 }
 
 let nearRequest = 0;
 async function updateNear() {
-  const near = $('near');
-  near.hidden = !state.pin;
   if (!state.pin) return;
-  const { lat, lng } = state.pin.getLatLng();
+  const { lng, lat } = state.pin.getLngLat();
   const request = ++nearRequest;
-  near.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  const result = await fetch(`${GEOCODER}/reverseGeocode?f=json&featureTypes=StreetAddress&location=${lng},${lat}`)
-    .then((r) => r.json())
-    .catch(() => null);
-  const address = result?.address?.Address;
-  if (request === nearRequest && address) near.textContent = t('near', { address });
+  $('near').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  const result = await fetch(`${GEOCODER}/reverseGeocode?f=json&featureTypes=StreetAddress&location=${lng},${lat}`).then((r) => r.json()).catch(() => null);
+  if (request === nearRequest && result?.address?.Address) $('near').textContent = t('near', { address: result.address.Address });
 }
 
 async function submit() {
-  const { lat, lng } = state.pin.getLatLng();
-  if (!insideCity(lat, lng)) {
-    toast(t('outside'));
-    return;
-  }
+  const { lng, lat } = state.pin.getLngLat();
+  if (!insideCity(lng, lat)) return toast(t('outside'));
   $('submit').disabled = true;
+  const suggestion = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source };
   try {
-    const saved = await store.add({
-      type: state.type,
-      lat: +lat.toFixed(6),
-      lng: +lng.toFixed(6),
-      note: $('note').value.trim(),
-      lang: state.lang,
-      source: state.source,
-    });
-    addDot(saved);
+    addDot({ ...suggestion, ...(await api({ action: 'add', ...suggestion })) });
     clearPin();
     toast(t('added'));
   } catch {
@@ -217,46 +197,43 @@ async function submit() {
 
 // Suggestions already on the map
 
-function dotIcon(s) {
-  return L.divIcon({
-    className: `dot ${s.type}`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-    html: s.votes > 1 ? `<b>${s.votes}</b>` : '',
-  });
+function badge(s) {
+  return s.votes > 1 ? `<b>${s.votes}</b>` : '';
 }
 
 function popupHtml(s) {
   const key = s.type === 'station' ? 'wantsStation' : 'wantsCorral';
   const voted = state.voted.has(s.id);
   return `<p>${s.votes === 1 ? t(`${key}One`) : t(key, { n: s.votes })}</p>
-    <button type="button" class="btn primary" data-vote="${s.id}"${voted ? ' disabled' : ''}>${t(voted ? 'voted' : 'meToo')}</button>`;
+    <button type="button" class="btn primary" data-vote${voted ? ' disabled' : ''}>${t(voted ? 'voted' : 'meToo')}</button>`;
 }
 
 function addDot(s) {
-  const marker = L.marker([s.lat, s.lng], { icon: dotIcon(s), keyboard: false })
-    .bindPopup(() => popupHtml(s), {
-      closeButton: false,
-      autoPanPaddingTopLeft: [0, phone.matches ? 120 : 0],
-      autoPanPaddingBottomRight: [0, phone.matches ? 100 : 0],
-    })
-    .addTo(map);
-  dots.set(s.id, { marker, data: s });
+  const el = document.createElement('div');
+  el.className = `dot ${s.type}`;
+  el.innerHTML = badge(s);
+  const popup = new maplibregl.Popup({ closeButton: false, offset: 12 });
+  popup.on('open', () => {
+    popup.setHTML(popupHtml(s));
+    popup.getElement().querySelector('[data-vote]').addEventListener('click', () => vote(s, popup));
+    const above = popup.getElement().getBoundingClientRect().top - $('map').getBoundingClientRect().top - 110;
+    if (phone.matches && above < 0) map.panBy([0, above]);
+  });
+  new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
+  dots.set(s.id, el);
 }
 
-async function vote(id, popup) {
-  const entry = dots.get(id);
+async function vote(s, popup) {
   try {
-    await store.vote(id);
+    await api({ action: 'vote', id: s.id });
   } catch {
-    toast(t('failed'));
-    return;
+    return toast(t('failed'));
   }
-  entry.data.votes += 1;
-  state.voted.add(id);
+  s.votes += 1;
+  state.voted.add(s.id);
   remember('voted', [...state.voted]);
-  entry.marker.setIcon(dotIcon(entry.data));
-  popup.setContent(() => popupHtml(entry.data));
+  dots.get(s.id).innerHTML = badge(s);
+  popup.setHTML(popupHtml(s));
 }
 
 // Address search
@@ -265,7 +242,7 @@ let searchTimer;
 async function search(text) {
   const url = `${GEOCODER}/findAddressCandidates?f=json&maxLocations=5&countryCode=USA&searchExtent=${context.bbox.join(',')}&singleLine=${encodeURIComponent(text)}`;
   const result = await fetch(url).then((r) => r.json()).catch(() => null);
-  showResults((result?.candidates || []).filter((c) => insideCity(c.location.y, c.location.x)));
+  showResults((result?.candidates || []).filter((c) => insideCity(c.location.x, c.location.y)));
 }
 
 function showResults(candidates) {
@@ -274,7 +251,7 @@ function showResults(candidates) {
     const li = document.createElement('li');
     li.textContent = c.address;
     li.addEventListener('click', () => {
-      map.setView([c.location.y, c.location.x], 17);
+      map.flyTo({ center: [c.location.x, c.location.y], zoom: 17 });
       $('search').value = c.address;
       showResults([]);
     });
@@ -285,18 +262,14 @@ function showResults(candidates) {
 
 // Wiring
 
-map.on('click', (e) => { if (!touch) placePin(e.latlng); });
-map.on('locationerror', () => toast(t('noLocation')));
-map.on('popupopen', (e) => {
-  const button = e.popup.getElement().querySelector('[data-vote]');
-  button?.addEventListener('click', () => vote(button.dataset.vote, e.popup));
-});
-
 $('drop').addEventListener('click', () => placePin(map.getCenter()));
 $('cta').addEventListener('click', () => placePin(map.getCenter()));
 $('cancel').addEventListener('click', clearPin);
 $('submit').addEventListener('click', submit);
-$('locate').addEventListener('click', () => map.locate({ setView: true, maxZoom: 17 }));
+$('locate').addEventListener('click', () => navigator.geolocation.getCurrentPosition(
+  ({ coords }) => map.flyTo({ center: [coords.longitude, coords.latitude], zoom: 17 }),
+  () => toast(t('noLocation')),
+));
 $('zoom-in').addEventListener('click', () => map.zoomIn());
 $('zoom-out').addEventListener('click', () => map.zoomOut());
 $('basemap').addEventListener('click', toggleBasemap);
@@ -305,7 +278,7 @@ $('help-close').addEventListener('click', () => $('help-dialog').close());
 
 $('types').addEventListener('change', (e) => {
   state.type = e.target.value;
-  state.pin?.setIcon(pinIcon());
+  state.pin?.getElement().classList.toggle('corral', state.type === 'corral');
   applyStrings();
 });
 phone.addEventListener('change', applyStrings);
@@ -318,10 +291,7 @@ $('lang').addEventListener('click', () => {
 $('search').addEventListener('input', (e) => {
   clearTimeout(searchTimer);
   const text = e.target.value.trim();
-  if (text.length < 3) {
-    showResults([]);
-    return;
-  }
+  if (text.length < 3) return showResults([]);
   searchTimer = setTimeout(() => search(text), 300);
 });
 $('search').addEventListener('keydown', (e) => {
@@ -338,6 +308,14 @@ $('types').hidden = state.locked;
 document.querySelector(`input[value="${state.type}"]`).checked = true;
 $('main').classList.toggle('touch', touch);
 
-[context, store] = await Promise.all([loadContext(), createStore(firebaseConfig)]);
-if (store.demo) toast(t('demo'), 5000);
-for (const s of await store.list()) addDot(s);
+context = await loadContext();
+map.on('mouseenter', 'places', (e) => { map.getCanvas().style.cursor = 'pointer'; showTip(e.features[0]); });
+map.on('mouseleave', 'places', () => { map.getCanvas().style.cursor = ''; tip.remove(); });
+map.on('click', (e) => {
+  if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+  const place = map.queryRenderedFeatures(e.point, { layers: ['places'] })[0];
+  if (place) showTip(place);
+  else if (!touch) placePin(e.lngLat);
+});
+if (!SHEET_URL) toast(t('demo'), 5000);
+for (const s of await api()) addDot(s);
