@@ -318,4 +318,4 @@ map.on('click', (e) => {
   else if (!touch) placePin(e.lngLat);
 });
 if (!SHEET_URL) toast(t('demo'), 5000);
-for (const s of await api()) addDot(s);
+for (const s of await api().catch(() => [])) addDot(s);
