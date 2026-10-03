@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=4';
-import { SHEET_URL } from './config.js?v=4';
+import { strings } from './strings.js?v=5';
+import { SHEET_URL } from './config.js?v=5';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -45,12 +45,49 @@ function remember(key, value) {
 }
 
 // The Google Sheet behind the map (see tools/sheet.gs). Without a URL the page runs as a demo.
-async function api(body) {
-  if (!SHEET_URL) return body ? { id: String(Date.now()), votes: 1 } : [];
-  const response = await fetch(SHEET_URL, body && { method: 'POST', body: JSON.stringify({ ...body, device }) });
-  const result = await response.json();
+// Apps Script is slow at random and now and then answers with an error page instead of the result,
+// so a call gets a full minute, and only the script's own refusals count as a definite no.
+async function call(body) {
+  const send = body ? { method: 'POST', body: JSON.stringify({ ...body, device }) } : {};
+  const response = await fetch(SHEET_URL, { ...send, signal: AbortSignal.timeout(60000) });
+  const text = await response.text();
+  if (/already voted/.test(text)) return {};
+  if (/invalid suggestion|unknown suggestion/.test(text)) throw new Error('refused');
+  let result;
+  try {
+    result = JSON.parse(text);
+  } catch {
+    throw new Error('unreachable');
+  }
   if (result.error) throw new Error(result.error);
   return result;
+}
+
+// The public list of suggestions, asked for up to three times.
+async function read() {
+  if (!SHEET_URL) return [];
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      if (attempt === 3) throw error;
+    }
+  }
+}
+
+// A save that seemed to fail may still have reached the sheet, so look before asking anyone to try
+// again: a second try at a pin would leave two of them.
+async function save(body, landed) {
+  if (!SHEET_URL) return { id: String(Date.now()) };
+  try {
+    return await call(body);
+  } catch (error) {
+    if (['refused', 'limit'].includes(error.message)) throw error;
+    const rows = await read().catch(() => null);
+    const row = rows?.find(landed);
+    if (row) return row;
+    throw new Error(rows ? 'failed' : 'unconfirmed');
+  }
 }
 
 // Text
@@ -98,7 +135,7 @@ function toast(message, duration = 5000) {
 }
 
 function sorry(error) {
-  toast(t(error.message === 'limit' ? 'limit' : 'failed'), 7000);
+  toast(t(['limit', 'unconfirmed'].includes(error.message) ? error.message : 'failed'), 8000);
 }
 
 // Map
@@ -227,8 +264,10 @@ async function submit(sure) {
     return $('sure').showModal();
   }
   const s = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source, votes: 1 };
-  s.saving = api({ action: 'add', ...s }).then((saved) => keepVote(s.id = saved.id));
+  const same = (r) => r.type === s.type && r.lat === s.lat && r.lng === s.lng && !suggestions.some((x) => x.id === r.id);
+  s.saving = save({ action: 'add', ...s }, same).then((saved) => keepVote(s.id = saved.id));
   s.voted = true;
+  s.mine = true;
   const dot = addDot(s);
   clearPin();
   toast(t('added'));
@@ -293,8 +332,28 @@ function addDot(s) {
   });
   el.addEventListener('keydown', escape);
   s.render();
+  s.marker = marker;
   suggestions.push(s);
   return marker;
+}
+
+// The live list replaces the published copy: new dots appear, counts catch up, and dots taken
+// off the map in the sheet go away. Pins added on this page stay until the sheet has them.
+function merge(rows) {
+  if (!rows) return;
+  const live = new Map(rows.map((r) => [r.id, r]));
+  for (const s of [...suggestions]) {
+    const r = live.get(s.id);
+    if (r) {
+      s.votes = Math.max(s.votes, r.votes);
+      s.render();
+      live.delete(s.id);
+    } else if (!s.mine) {
+      s.marker.remove();
+      suggestions.splice(suggestions.indexOf(s), 1);
+    }
+  }
+  for (const r of live.values()) addDot(r);
 }
 
 // A suggestion counts as its author's vote, so this is also called when one is saved.
@@ -305,6 +364,7 @@ function keepVote(id) {
 
 // The count changes at once and the sheet catches up; a refused vote is taken back.
 async function vote(s) {
+  const before = s.votes;
   const mark = (voted) => {
     s.votes += voted ? 1 : -1;
     s.voted = voted;
@@ -313,11 +373,11 @@ async function vote(s) {
   mark(true);
   try {
     await s.saving;
-    await api({ action: 'vote', id: s.id });
+    await save({ action: 'vote', id: s.id }, (r) => r.id === s.id && r.votes > before);
     keepVote(s.id);
   } catch (error) {
     mark(false);
-    sorry(error);
+    sorry(error.message === 'unconfirmed' ? new Error('failed') : error);
   }
 }
 
@@ -428,7 +488,8 @@ $('types').hidden = state.locked;
 for (const choice of choices) choice.hidden = state.locked && choice.value !== state.type;
 $('main').classList.toggle('touch', touch);
 $('welcome').showModal();
-const saved = api().catch(() => []);
+const published = fetch('data/suggestions.json', { cache: 'no-cache' }).then((r) => r.json()).catch(() => []);
+const live = read().catch(() => null);
 
 if (!window.maplibregl) await new Promise((done) => $('gl').addEventListener('load', done));
 map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-77.09, 38.82], zoom: 12, minZoom: 12, maxZoom: 19, attributionControl: false });
@@ -445,4 +506,5 @@ map.on('click', (e) => {
 for (const choice of choices) choice.disabled = false;
 $('ask').textContent = t('ask');
 if (!SHEET_URL) toast(t('demo'));
-for (const s of await saved) addDot(s);
+for (const s of await published) addDot(s);
+merge(await live);

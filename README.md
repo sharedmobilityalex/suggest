@@ -29,6 +29,15 @@ of the script. To take a suggestion off the map, type TRUE in its `hidden` cell.
 editing the script, publish it again under Deploy, Manage deployments, New
 version; the URL stays the same.
 
+## Publishing
+
+`.github/workflows/publish.yml` publishes the site on every push and about every
+10 minutes. Each run copies the public suggestions from the sheet into
+`data/suggestions.json`, so the map shows its dots at once and then refreshes
+them from the sheet. GitHub pauses scheduled runs after 60 days without a
+commit; re-enable the workflow under Actions if that happens. Pages must be set
+to build from GitHub Actions, not from a branch.
+
 ## Releasing a change
 
 Browsers keep each file for ten minutes. Raise the `?v=` number on the
