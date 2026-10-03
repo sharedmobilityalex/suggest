@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=3';
-import { SHEET_URL } from './config.js?v=3';
+import { strings } from './strings.js?v=4';
+import { SHEET_URL } from './config.js?v=4';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -9,6 +9,7 @@ const CREDITS = {
   satellite: '&copy; Esri, Maxar, Earthstar Geographics',
 };
 const PIN = '<svg viewBox="0 0 30 40"><path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25C30 6.7 23.3 0 15 0z"/><circle cx="15" cy="15" r="6" fill="#fff"/></svg>';
+const NEARBY = 100; // metres: a new pin this close to a suggestion of the same type is treated as a repeat
 
 const params = new URLSearchParams(location.search);
 const touch = matchMedia('(pointer: coarse)').matches;
@@ -16,7 +17,7 @@ const phone = matchMedia('(max-width: 767px)');
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  lang: pick(params.get('lang') || remember('lang') || navigator.language.slice(0, 2), ['en', 'es'], 'en'),
+  lang: pick(params.get('lang') || remember('lang') || navigator.language.slice(0, 2), Object.keys(strings), 'en'),
   type: pick(params.get('type'), ['station', 'corral'], 'station'),
   locked: ['station', 'corral'].includes(params.get('type')),
   source: pick(params.get('src'), ['qr', 'web'], 'direct'),
@@ -25,6 +26,7 @@ const state = {
   voted: new Set(remember('voted') || []),
 };
 const device = remember('device') || remember('device', crypto.randomUUID());
+const suggestions = [];
 let map;
 let tip;
 let context;
@@ -46,7 +48,9 @@ function remember(key, value) {
 async function api(body) {
   if (!SHEET_URL) return body ? { id: String(Date.now()), votes: 1 } : [];
   const response = await fetch(SHEET_URL, body && { method: 'POST', body: JSON.stringify({ ...body, device }) });
-  return response.json();
+  const result = await response.json();
+  if (result.error) throw new Error(result.error);
+  return result;
 }
 
 // Text
@@ -62,30 +66,39 @@ function label(el, text) {
 
 function applyStrings() {
   document.documentElement.lang = state.lang;
+  document.documentElement.dir = state.lang === 'ar' ? 'rtl' : 'ltr';
   for (const el of document.querySelectorAll('[data-s]')) el[el.matches('input') ? 'placeholder' : 'textContent'] = t(el.dataset.s);
   for (const el of document.querySelectorAll('[data-s-label]')) label(el, t(el.dataset.sLabel));
   if (phone.matches) for (const el of document.querySelectorAll('[data-s-phone]')) el.textContent = t(el.dataset.sPhone);
+  for (const el of document.querySelectorAll('[data-lang]')) el.setAttribute('aria-current', el.dataset.lang === state.lang);
   $('tagline').textContent = t(state.type === 'station' ? 'taglineStation' : 'taglineCorral');
   $('hint').textContent = t(touch ? 'hintTouch' : 'hintMouse');
   $('drop').textContent = t(touch ? 'drop' : 'centre');
   $('cta').textContent = t('drop');
-  const other = state.lang === 'en' ? 'es' : 'en';
-  $('lang').textContent = phone.matches ? other.toUpperCase() : { es: 'Español', en: 'English' }[other];
-  $('lang').lang = other;
-  $('welcome-lang').textContent = { es: 'Español', en: 'English' }[other];
-  $('welcome-lang').lang = other;
   $('ask').textContent = t(context ? 'ask' : 'loading');
   labelBasemap();
   updateNear();
+  for (const s of suggestions) s.render();
+}
+
+function setLang(code) {
+  state.lang = code;
+  remember('lang', code);
+  $('langs').close();
+  applyStrings();
 }
 
 let toastTimer;
-function toast(message, duration = 3000) {
+function toast(message, duration = 5000) {
   const el = $('toast');
   el.textContent = message;
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+function sorry(error) {
+  toast(t(error.message === 'limit' ? 'limit' : 'failed'), 7000);
 }
 
 // Map
@@ -119,7 +132,7 @@ async function loadContext() {
   map.addLayer({ id: 'labels', type: 'raster', source: 'labels', layout: { visibility: 'none' } });
   map.addLayer({ id: 'mask', type: 'fill', source: 'city', paint: { 'fill-color': '#1d1d1b', 'fill-opacity': 0.08 } });
   map.addLayer({ id: 'boundary', type: 'line', source: 'city', paint: { 'line-color': '#0b9cd8', 'line-width': 2, 'line-dasharray': [3, 3] } });
-  map.addLayer({ id: 'places', type: 'circle', source: 'places', paint: { 'circle-radius': 4, 'circle-color': ['match', ['get', 'kind'], 'corral', '#0d9488', '#8d8c82'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
+  map.addLayer({ id: 'places', type: 'circle', source: 'places', paint: { 'circle-radius': 4, 'circle-color': ['match', ['get', 'kind'], 'corral', '#0d9488', '#6b6a62'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
 
   const [w, s, e, n] = ctx.bbox;
   map.fitBounds(ctx.bbox, { padding: 8, animate: false });
@@ -171,20 +184,48 @@ function clearPin() {
   setPinned(false);
 }
 
+// The closest suggestion of the chosen type within NEARBY metres of the pin, if there is one.
+function nearby() {
+  const { lng, lat } = state.pin.getLngLat();
+  const east = 111320 * Math.cos((lat * Math.PI) / 180);
+  let closest;
+  let reach = NEARBY;
+  for (const s of suggestions) {
+    const distance = Math.hypot((s.lng - lng) * east, (s.lat - lat) * 110540);
+    if (s.type === state.type && distance <= reach) [closest, reach] = [s, distance];
+  }
+  return closest;
+}
+
+function hasVoted(s) {
+  return s.voted || state.voted.has(s.id);
+}
+
+// Shows where the pin is, and says so when someone has already suggested the same thing next to it.
 let nearRequest = 0;
 async function updateNear() {
   if (!state.pin) return;
   const { lng, lat } = state.pin.getLngLat();
+  const repeat = nearby();
+  $('nudge-text').textContent = t(state.type === 'station' ? 'nudgeStation' : 'nudgeCorral');
+  $('nudge-vote').hidden = !repeat || hasVoted(repeat);
+  $('nudge').hidden = !repeat;
   const request = ++nearRequest;
   $('near').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   const result = await fetch(`${GEOCODER}/reverseGeocode?f=json&featureTypes=StreetAddress&location=${lng},${lat}`).then((r) => r.json()).catch(() => null);
   if (request === nearRequest && result?.address?.Address) $('near').textContent = t('near', { address: result.address.Address });
 }
 
-// The dot goes on the map at once and the sheet catches up; a refused save puts the pin back.
-async function submit() {
+// A pin beside an existing suggestion needs a second, explicit yes. Otherwise the dot goes on the
+// map at once and the sheet catches up; a refused save puts the pin back.
+async function submit(sure) {
   const { lng, lat } = state.pin.getLngLat();
   if (!insideCity(lng, lat)) return toast(t('outside'));
+  const repeat = nearby();
+  if (repeat && sure !== true) {
+    $('sure-vote').hidden = hasVoted(repeat);
+    return $('sure').showModal();
+  }
   const s = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source, votes: 1 };
   s.saving = api({ action: 'add', ...s }).then((saved) => keepVote(s.id = saved.id));
   s.voted = true;
@@ -193,42 +234,67 @@ async function submit() {
   toast(t('added'));
   try {
     await s.saving;
-  } catch {
+  } catch (error) {
     dot.remove();
+    suggestions.splice(suggestions.indexOf(s), 1);
     if (!state.pin) {
       placePin({ lng, lat });
       $('note').value = s.note;
     }
-    toast(t('failed'));
+    sorry(error);
   }
+}
+
+// Gives the pin up and votes for the suggestion beside it instead.
+function voteNearby() {
+  const repeat = nearby();
+  clearPin();
+  if (!repeat || hasVoted(repeat)) return;
+  vote(repeat);
+  toast(t('voteAdded'));
 }
 
 // Suggestions already on the map
 
-function popupHtml(s) {
+function describe(s) {
   const key = s.type === 'station' ? 'wantsStation' : 'wantsCorral';
-  const voted = s.voted || state.voted.has(s.id);
-  return `<p>${s.votes === 1 ? t(`${key}One`) : t(key, { n: s.votes })}</p>
-    <button type="button" class="btn primary" data-vote${voted ? ' disabled' : ''}>${t(voted ? 'voted' : 'meToo')}</button>`;
+  return s.votes === 1 ? t(`${key}One`) : t(key, { n: s.votes });
 }
 
 function addDot(s) {
-  const el = document.createElement('div');
+  const el = document.createElement('button');
+  el.type = 'button';
   el.className = `dot ${s.type}`;
-  const popup = new maplibregl.Popup({ closeButton: false, offset: 12 });
-  const render = () => {
+  const popup = new maplibregl.Popup({ closeButton: false, offset: 14 });
+  const marker = new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
+  const escape = (e) => {
+    if (e.key !== 'Escape' || !popup.isOpen()) return;
+    popup.remove();
+    el.focus();
+  };
+  s.render = () => {
     el.innerHTML = s.votes > 1 ? `<b>${s.votes}</b>` : '';
+    el.setAttribute('aria-label', describe(s));
     if (!popup.isOpen()) return;
-    popup.setHTML(popupHtml(s));
-    popup.getElement().querySelector('[data-vote]').onclick = () => vote(s, render);
+    popup.setHTML(`<p>${describe(s)}</p><button type="button" class="btn primary" data-vote${hasVoted(s) ? ' disabled' : ''}>${t(hasVoted(s) ? 'voted' : 'meToo')}</button>`);
+    popup.getElement().querySelector('[data-vote]').onclick = () => vote(s);
   };
   popup.on('open', () => {
-    render();
+    s.render();
+    popup.getElement().addEventListener('keydown', escape);
     const above = popup.getElement().getBoundingClientRect().top - $('map').getBoundingClientRect().top - 110;
     if (phone.matches && above < 0) map.panBy([0, above]);
   });
-  render();
-  return new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
+  // The map opens the popup on a pointer click. A keyboard press reaches the dot as a click with no detail.
+  el.addEventListener('click', (e) => {
+    if (e.detail !== 0) return;
+    marker.togglePopup();
+    popup.getElement()?.querySelector('[data-vote]').focus();
+  });
+  el.addEventListener('keydown', escape);
+  s.render();
+  suggestions.push(s);
+  return marker;
 }
 
 // A suggestion counts as its author's vote, so this is also called when one is saved.
@@ -238,20 +304,20 @@ function keepVote(id) {
 }
 
 // The count changes at once and the sheet catches up; a refused vote is taken back.
-async function vote(s, render) {
+async function vote(s) {
   const mark = (voted) => {
     s.votes += voted ? 1 : -1;
     s.voted = voted;
-    render();
+    s.render();
   };
   mark(true);
   try {
     await s.saving;
     await api({ action: 'vote', id: s.id });
     keepVote(s.id);
-  } catch {
+  } catch (error) {
     mark(false);
-    toast(t('failed'));
+    sorry(error);
   }
 }
 
@@ -268,8 +334,10 @@ function showResults(candidates) {
   const list = $('results');
   list.replaceChildren(...candidates.map((c) => {
     const li = document.createElement('li');
-    li.textContent = c.address;
-    li.addEventListener('click', () => {
+    const button = li.appendChild(document.createElement('button'));
+    button.type = 'button';
+    button.textContent = c.address;
+    button.addEventListener('click', () => {
       map.flyTo({ center: [c.location.x, c.location.y], zoom: 17 });
       $('search').value = c.address;
       showResults([]);
@@ -281,10 +349,20 @@ function showResults(candidates) {
 
 // Wiring
 
+function setType(type) {
+  state.type = type;
+  document.querySelector(`input[value="${type}"]`).checked = true;
+  state.pin?.getElement().classList.toggle('corral', type === 'corral');
+  applyStrings();
+}
+
 $('drop').addEventListener('click', () => placePin(map.getCenter()));
 $('cta').addEventListener('click', () => placePin(map.getCenter()));
 $('cancel').addEventListener('click', clearPin);
 $('submit').addEventListener('click', submit);
+$('nudge-vote').addEventListener('click', voteNearby);
+$('sure-vote').addEventListener('click', () => { $('sure').close(); voteNearby(); });
+$('sure-submit').addEventListener('click', () => { $('sure').close(); submit(true); });
 $('locate').addEventListener('click', () => {
   const done = () => $('locate').classList.remove('busy');
   $('locate').classList.add('busy');
@@ -298,25 +376,10 @@ $('zoom-in').addEventListener('click', () => map.zoomIn());
 $('zoom-out').addEventListener('click', () => map.zoomOut());
 $('basemap').addEventListener('click', toggleBasemap);
 $('help').addEventListener('click', () => $('help-dialog').showModal());
-$('help-close').addEventListener('click', () => $('help-dialog').close());
-
-function setType(type) {
-  state.type = type;
-  document.querySelector(`input[value="${type}"]`).checked = true;
-  state.pin?.getElement().classList.toggle('corral', type === 'corral');
-  applyStrings();
-}
-
-function toggleLang() {
-  state.lang = state.lang === 'en' ? 'es' : 'en';
-  remember('lang', state.lang);
-  applyStrings();
-}
-
+$('lang').addEventListener('click', () => $('langs').showModal());
 $('types').addEventListener('change', (e) => setType(e.target.value));
 phone.addEventListener('change', applyStrings);
-$('lang').addEventListener('click', toggleLang);
-$('welcome-lang').addEventListener('click', toggleLang);
+
 // Escape closes the welcome screen and a click can land outside it; both bring a reminder instead.
 $('welcome').addEventListener('close', () => {
   if (document.querySelector('input[name="type"]:checked')) return;
@@ -341,14 +404,24 @@ $('search').addEventListener('input', (e) => {
   searchTimer = setTimeout(() => search(text), 300);
 });
 $('search').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') $('results').querySelector('li')?.click();
+  if (e.key === 'Enter') $('results').querySelector('button')?.click();
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.search')) showResults([]);
+  e.target.closest('[data-close]')?.closest('dialog').close();
+  const language = e.target.closest('[data-lang]');
+  if (language) setLang(language.dataset.lang);
 });
 
 // Start: the welcome screen shows at once; the map loads behind it and then unlocks the choices
 
+for (const list of document.querySelectorAll('.langs')) {
+  list.replaceChildren(...Object.keys(strings).map((code) => {
+    const button = Object.assign(document.createElement('button'), { type: 'button', className: list.dataset.buttons, lang: code, textContent: strings[code].name });
+    button.dataset.lang = code;
+    return button;
+  }));
+}
 const choices = document.querySelectorAll('#welcome [value]');
 applyStrings();
 $('types').hidden = state.locked;
@@ -371,5 +444,5 @@ map.on('click', (e) => {
 });
 for (const choice of choices) choice.disabled = false;
 $('ask').textContent = t('ask');
-if (!SHEET_URL) toast(t('demo'), 5000);
+if (!SHEET_URL) toast(t('demo'));
 for (const s of await saved) addDot(s);

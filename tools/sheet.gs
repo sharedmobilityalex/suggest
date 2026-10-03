@@ -4,6 +4,10 @@
 
 const HEADERS = ['id', 'created', 'type', 'lat', 'lng', 'note', 'lang', 'source', 'device', 'votes', 'hidden'];
 
+// Ceilings that keep one device, or a script, from flooding the map. Raise the per-device
+// numbers before an event where many people will share one tablet.
+const LIMITS = { pinsPerDevicePerDay: 25, pinsPerHour: 300, votesPerDevicePerDay: 100, votesPerHour: 1500 };
+
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   for (const [name, headers] of [['suggestions', HEADERS], ['votes', ['id', 'device', 'created']]]) {
@@ -34,8 +38,11 @@ function add(b) {
   const lat = Number(b.lat);
   const lng = Number(b.lng);
   if (!['station', 'corral'].includes(b.type) || !inCity(lat, lng)) throw new Error('invalid suggestion');
+  const device = text(b.device, 40);
+  const suggestions = sheet('suggestions');
+  if (overLimit(suggestions.getDataRange().getValues(), 1, 8, device, LIMITS.pinsPerDevicePerDay, LIMITS.pinsPerHour)) return { error: 'limit' };
   const id = 's' + Utilities.getUuid().slice(0, 8);
-  sheet('suggestions').appendRow([id, new Date(), b.type, lat, lng, text(b.note, 200), text(b.lang, 2), text(b.source, 6), text(b.device, 40), 1, false]);
+  suggestions.appendRow([id, new Date(), b.type, lat, lng, text(b.note, 200), text(b.lang, 2), text(b.source, 6), device, 1, false]);
   return { id, votes: 1 };
 }
 
@@ -44,7 +51,9 @@ function vote(b) {
   const id = String(b.id);
   const device = text(b.device, 40);
   const votes = sheet('votes');
-  if (votes.getDataRange().getValues().some((r) => r[0] === id && r[1] === device)) throw new Error('already voted');
+  const cast = votes.getDataRange().getValues();
+  if (cast.some((r) => r[0] === id && r[1] === device)) throw new Error('already voted');
+  if (overLimit(cast, 2, 1, device, LIMITS.votesPerDevicePerDay, LIMITS.votesPerHour)) return { error: 'limit' };
   const suggestions = sheet('suggestions');
   const row = suggestions.getDataRange().getValues().findIndex((r) => r[0] === id);
   if (row < 1) throw new Error('unknown suggestion');
@@ -52,6 +61,15 @@ function vote(b) {
   suggestions.getRange(row + 1, 10).setValue(n);
   votes.appendRow([id, device, new Date()]);
   return { votes: n };
+}
+
+// True when this device has used up its day, or everyone together has used up the hour.
+// `created` and `owner` are the columns holding each row's time and device.
+function overLimit(rows, created, owner, device, perDevicePerDay, perHour) {
+  const age = (r) => Date.now() - new Date(r[created]).getTime();
+  const today = rows.filter((r) => r[owner] === device && age(r) < 864e5).length;
+  const thisHour = rows.filter((r) => age(r) < 36e5).length;
+  return today >= perDevicePerDay || thisHour >= perHour;
 }
 
 // Text from the public is trimmed, and kept from being read as a spreadsheet formula.
