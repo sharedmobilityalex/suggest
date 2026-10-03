@@ -25,7 +25,6 @@ const state = {
   voted: new Set(remember('voted') || []),
 };
 const device = remember('device') || remember('device', crypto.randomUUID());
-const dots = new Map();
 let context;
 
 function pick(value, allowed, fallback) {
@@ -180,30 +179,32 @@ async function updateNear() {
   if (request === nearRequest && result?.address?.Address) $('near').textContent = t('near', { address: result.address.Address });
 }
 
+// The dot goes on the map at once and the sheet catches up; a refused save puts the pin back.
 async function submit() {
   const { lng, lat } = state.pin.getLngLat();
   if (!insideCity(lng, lat)) return toast(t('outside'));
-  $('submit').disabled = true;
-  const suggestion = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source };
+  const s = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source, votes: 1 };
+  s.saving = api({ action: 'add', ...s }).then((saved) => { s.id = saved.id; });
+  const dot = addDot(s);
+  clearPin();
+  toast(t('added'));
   try {
-    addDot({ ...suggestion, ...(await api({ action: 'add', ...suggestion })) });
-    clearPin();
-    toast(t('added'));
+    await s.saving;
   } catch {
+    dot.remove();
+    if (!state.pin) {
+      placePin({ lng, lat });
+      $('note').value = s.note;
+    }
     toast(t('failed'));
-    $('submit').disabled = false;
   }
 }
 
 // Suggestions already on the map
 
-function badge(s) {
-  return s.votes > 1 ? `<b>${s.votes}</b>` : '';
-}
-
 function popupHtml(s) {
   const key = s.type === 'station' ? 'wantsStation' : 'wantsCorral';
-  const voted = state.voted.has(s.id);
+  const voted = s.voted || state.voted.has(s.id);
   return `<p>${s.votes === 1 ? t(`${key}One`) : t(key, { n: s.votes })}</p>
     <button type="button" class="btn primary" data-vote${voted ? ' disabled' : ''}>${t(voted ? 'voted' : 'meToo')}</button>`;
 }
@@ -211,29 +212,39 @@ function popupHtml(s) {
 function addDot(s) {
   const el = document.createElement('div');
   el.className = `dot ${s.type}`;
-  el.innerHTML = badge(s);
   const popup = new maplibregl.Popup({ closeButton: false, offset: 12 });
-  popup.on('open', () => {
+  const render = () => {
+    el.innerHTML = s.votes > 1 ? `<b>${s.votes}</b>` : '';
+    if (!popup.isOpen()) return;
     popup.setHTML(popupHtml(s));
-    popup.getElement().querySelector('[data-vote]').addEventListener('click', () => vote(s, popup));
+    popup.getElement().querySelector('[data-vote]').onclick = () => vote(s, render);
+  };
+  popup.on('open', () => {
+    render();
     const above = popup.getElement().getBoundingClientRect().top - $('map').getBoundingClientRect().top - 110;
     if (phone.matches && above < 0) map.panBy([0, above]);
   });
-  new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
-  dots.set(s.id, el);
+  render();
+  return new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
 }
 
-async function vote(s, popup) {
+// The count changes at once and the sheet catches up; a refused vote is taken back.
+async function vote(s, render) {
+  const mark = (voted) => {
+    s.votes += voted ? 1 : -1;
+    s.voted = voted;
+    render();
+  };
+  mark(true);
   try {
+    await s.saving;
     await api({ action: 'vote', id: s.id });
+    state.voted.add(s.id);
+    remember('voted', [...state.voted]);
   } catch {
-    return toast(t('failed'));
+    mark(false);
+    toast(t('failed'));
   }
-  s.votes += 1;
-  state.voted.add(s.id);
-  remember('voted', [...state.voted]);
-  dots.get(s.id).innerHTML = badge(s);
-  popup.setHTML(popupHtml(s));
 }
 
 // Address search
@@ -266,10 +277,15 @@ $('drop').addEventListener('click', () => placePin(map.getCenter()));
 $('cta').addEventListener('click', () => placePin(map.getCenter()));
 $('cancel').addEventListener('click', clearPin);
 $('submit').addEventListener('click', submit);
-$('locate').addEventListener('click', () => navigator.geolocation.getCurrentPosition(
-  ({ coords }) => map.flyTo({ center: [coords.longitude, coords.latitude], zoom: 17 }),
-  () => toast(t('noLocation')),
-));
+$('locate').addEventListener('click', () => {
+  const done = () => $('locate').classList.remove('busy');
+  $('locate').classList.add('busy');
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => { done(); map.flyTo({ center: [coords.longitude, coords.latitude], zoom: 17 }); },
+    () => { done(); toast(t('noLocation')); },
+    { timeout: 10000 },
+  );
+});
 $('zoom-in').addEventListener('click', () => map.zoomIn());
 $('zoom-out').addEventListener('click', () => map.zoomOut());
 $('basemap').addEventListener('click', toggleBasemap);

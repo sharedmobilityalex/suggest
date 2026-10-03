@@ -62,6 +62,7 @@ main:not(.pinned) .near { display: none; }
 /* Map overlays */
 .rail { position: absolute; top: 12px; right: 12px; z-index: 1001; display: flex; flex-direction: column; gap: 8px; }
 .rail button { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 50%; background: var(--paper); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); font-size: 20px; }
+.rail .busy { border-color: var(--blue); color: var(--blue); }
 .crosshair { display: none; position: absolute; top: 50%; left: 50%; z-index: 1000; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 2px solid var(--blue); border-radius: 50%; pointer-events: none; }
 .crosshair::before, .crosshair::after { content: ""; position: absolute; background: var(--blue); }
 .crosshair::before { top: -8px; bottom: -8px; left: 50%; width: 2px; margin-left: -1px; }
@@ -116,3 +117,6 @@ dialog .btn { margin-top: 8px; }
   .rail { top: auto; bottom: calc(104px + env(safe-area-inset-bottom)); }
   .toast { top: 150px; }
 }
+
+/* Touch keyboards: 16px keeps iOS from zooming the page when a field takes focus */
+@media (pointer: coarse) { .search input, textarea { font-size: 16px; } }
