@@ -27,6 +27,12 @@ To take a suggestion off the map, type TRUE in its `hidden` cell. After
 editing the script, publish it again under Deploy, Manage deployments, New
 version; the URL stays the same.
 
+## Releasing a change
+
+Browsers keep each file for ten minutes. Raise the `?v=` number on the
+stylesheet and script in `index.html`, and on the two imports at the top of
+`app.js`, so a reload picks up the new version at once.
+
 ## URL parameters
 
 | Parameter | Values | Effect |

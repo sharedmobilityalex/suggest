@@ -1,5 +1,5 @@
-import { strings } from './strings.js';
-import { SHEET_URL } from './config.js';
+import { strings } from './strings.js?v=2';
+import { SHEET_URL } from './config.js?v=2';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -25,6 +25,8 @@ const state = {
   voted: new Set(remember('voted') || []),
 };
 const device = remember('device') || remember('device', crypto.randomUUID());
+let map;
+let tip;
 let context;
 
 function pick(value, allowed, fallback) {
@@ -70,6 +72,9 @@ function applyStrings() {
   const other = state.lang === 'en' ? 'es' : 'en';
   $('lang').textContent = phone.matches ? other.toUpperCase() : { es: 'Español', en: 'English' }[other];
   $('lang').lang = other;
+  $('welcome-lang').textContent = { es: 'Español', en: 'English' }[other];
+  $('welcome-lang').lang = other;
+  $('ask').textContent = t(context ? 'ask' : 'loading');
   labelBasemap();
   updateNear();
 }
@@ -84,9 +89,6 @@ function toast(message, duration = 3000) {
 }
 
 // Map
-
-const map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-77.09, 38.82], zoom: 12, minZoom: 12, maxZoom: 19, attributionControl: false });
-const tip = new maplibregl.Popup({ closeButton: false, offset: 8, className: 'tip' });
 
 function toggleBasemap() {
   if (!map.getLayer('imagery')) return;
@@ -184,7 +186,8 @@ async function submit() {
   const { lng, lat } = state.pin.getLngLat();
   if (!insideCity(lng, lat)) return toast(t('outside'));
   const s = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source, votes: 1 };
-  s.saving = api({ action: 'add', ...s }).then((saved) => { s.id = saved.id; });
+  s.saving = api({ action: 'add', ...s }).then((saved) => keepVote(s.id = saved.id));
+  s.voted = true;
   const dot = addDot(s);
   clearPin();
   toast(t('added'));
@@ -228,6 +231,12 @@ function addDot(s) {
   return new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
 }
 
+// A suggestion counts as its author's vote, so this is also called when one is saved.
+function keepVote(id) {
+  state.voted.add(id);
+  remember('voted', [...state.voted]);
+}
+
 // The count changes at once and the sheet catches up; a refused vote is taken back.
 async function vote(s, render) {
   const mark = (voted) => {
@@ -239,8 +248,7 @@ async function vote(s, render) {
   try {
     await s.saving;
     await api({ action: 'vote', id: s.id });
-    state.voted.add(s.id);
-    remember('voted', [...state.voted]);
+    keepVote(s.id);
   } catch {
     mark(false);
     toast(t('failed'));
@@ -292,16 +300,31 @@ $('basemap').addEventListener('click', toggleBasemap);
 $('help').addEventListener('click', () => $('help-dialog').showModal());
 $('help-close').addEventListener('click', () => $('help-dialog').close());
 
-$('types').addEventListener('change', (e) => {
-  state.type = e.target.value;
-  state.pin?.getElement().classList.toggle('corral', state.type === 'corral');
+function setType(type) {
+  state.type = type;
+  document.querySelector(`input[value="${type}"]`).checked = true;
+  state.pin?.getElement().classList.toggle('corral', type === 'corral');
   applyStrings();
-});
-phone.addEventListener('change', applyStrings);
-$('lang').addEventListener('click', () => {
+}
+
+function toggleLang() {
   state.lang = state.lang === 'en' ? 'es' : 'en';
   remember('lang', state.lang);
   applyStrings();
+}
+
+$('types').addEventListener('change', (e) => setType(e.target.value));
+phone.addEventListener('change', applyStrings);
+$('lang').addEventListener('click', toggleLang);
+$('welcome-lang').addEventListener('click', toggleLang);
+$('welcome').addEventListener('close', () => {
+  if (!document.querySelector('input[name="type"]:checked')) $('welcome').showModal();
+});
+$('welcome').addEventListener('click', (e) => {
+  const choice = e.target.closest('[value]');
+  if (!choice) return;
+  setType(choice.value);
+  $('welcome').close();
 });
 
 $('search').addEventListener('input', (e) => {
@@ -317,13 +340,19 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.search')) showResults([]);
 });
 
-// Start
+// Start: the welcome screen shows at once; the map loads behind it and then unlocks the choices
 
+const choices = document.querySelectorAll('#welcome [value]');
 applyStrings();
 $('types').hidden = state.locked;
-document.querySelector(`input[value="${state.type}"]`).checked = true;
+for (const choice of choices) choice.hidden = state.locked && choice.value !== state.type;
 $('main').classList.toggle('touch', touch);
+$('welcome').showModal();
+const saved = api().catch(() => []);
 
+if (!window.maplibregl) await new Promise((done) => $('gl').addEventListener('load', done));
+map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-77.09, 38.82], zoom: 12, minZoom: 12, maxZoom: 19, attributionControl: false });
+tip = new maplibregl.Popup({ closeButton: false, offset: 8, className: 'tip' });
 context = await loadContext();
 map.on('mouseenter', 'places', (e) => { map.getCanvas().style.cursor = 'pointer'; showTip(e.features[0]); });
 map.on('mouseleave', 'places', () => { map.getCanvas().style.cursor = ''; tip.remove(); });
@@ -333,5 +362,7 @@ map.on('click', (e) => {
   if (place) showTip(place);
   else if (!touch) placePin(e.lngLat);
 });
+for (const choice of choices) choice.disabled = false;
+$('ask').textContent = t('ask');
 if (!SHEET_URL) toast(t('demo'), 5000);
-for (const s of await api().catch(() => [])) addDot(s);
+for (const s of await saved) addDot(s);

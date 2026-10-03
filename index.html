@@ -7,7 +7,7 @@
 <meta name="description" content="Suggest a location for a Capital Bikeshare station or a bike and scooter parking corral in Alexandria, Virginia.">
 <link rel="icon" href="assets/favicon.svg">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
@@ -73,6 +73,17 @@
   </div>
 </main>
 
+<dialog id="welcome">
+  <h2 data-s="title"></h2>
+  <p data-s="welcome"></p>
+  <p class="ask" id="ask"></p>
+  <div class="choices">
+    <button type="button" class="btn" value="station" disabled><span class="swatch station"></span><span data-s="station"></span></button>
+    <button type="button" class="btn" value="corral" disabled><span class="swatch corral"></span><span data-s="corral"></span></button>
+  </div>
+  <button type="button" class="link" id="welcome-lang"></button>
+</dialog>
+
 <dialog id="help-dialog">
   <h2 data-s="help"></h2>
   <ol>
@@ -87,7 +98,7 @@
   <button type="button" class="btn" id="help-close" data-s="close"></button>
 </dialog>
 
-<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-<script type="module" src="app.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js" async id="gl"></script>
+<script type="module" src="app.js?v=2"></script>
 </body>
 </html>
