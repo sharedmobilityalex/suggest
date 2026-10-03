@@ -16,9 +16,9 @@ demo mode and keeps suggestions in memory.
 1. **Firebase.** Create a project, enable Anonymous sign-in under
    Authentication, create a Firestore database, publish `firestore.rules`,
    and paste the web app config into `config.js`.
-2. **Staff access.** Notes are private. To read them in the console or in a
-   future admin page, add a document to the `staff` collection whose id is
-   the staff member's user id.
+2. **Staff access.** Notes are kept off the map. To read them in the console
+   or in a future admin page, add a document to the `staff` collection whose
+   id is the staff member's user id.
 3. **Context data.** `python3 tools/bake_context.py` refreshes the stations,
    corrals and City boundary in `data/context.json`.
 
@@ -39,5 +39,5 @@ account.
 ## Data
 
 Suggestions are stored as `suggestions` (public: type, location, vote count),
-`notes` (staff only) and `votes` (one per person per suggestion). Setting
+`notes` (kept off the map) and `votes` (one per person per suggestion). Setting
 `hidden` to true on a suggestion removes it from the map.
