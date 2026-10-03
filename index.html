@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mark the spot · City of Alexandria</title>
+<meta name="description" content="Suggest a location for a Capital Bikeshare station or a bike and scooter parking corral in Alexandria, Virginia.">
+<link rel="icon" href="assets/favicon.svg">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="bar">
+  <img class="lockup" src="assets/tes-logo.png" alt="City of Alexandria, Transportation and Environmental Services">
+  <h1 data-s="title"></h1>
+  <button type="button" class="bar-btn" id="lang"></button>
+  <button type="button" class="bar-btn" id="help" data-s-aria="help">?</button>
+</header>
+
+<main id="main">
+  <div class="strip">
+    <p class="tagline" id="tagline"></p>
+    <div class="types" id="types">
+      <label><input type="radio" name="type" value="station"><span class="swatch station"></span><span data-s="station"></span></label>
+      <label><input type="radio" name="type" value="corral"><span class="swatch corral"></span><span data-s="corral"></span></label>
+    </div>
+    <div class="search">
+      <input type="search" id="search" autocomplete="off" data-s-ph="search" data-s-aria="search">
+      <ul id="results" hidden></ul>
+    </div>
+  </div>
+
+  <aside class="panel" id="panel">
+    <div class="step" id="drop-step">
+      <h2 data-s="step2"></h2>
+      <p class="hint" id="hint"></p>
+      <button type="button" class="btn" id="drop"></button>
+    </div>
+    <p class="near" id="near" hidden></p>
+    <div class="step">
+      <h2 data-s="step3"></h2>
+      <textarea id="note" maxlength="200" rows="3"></textarea>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="cancel" data-s="cancel"></button>
+      <button type="button" class="btn primary" id="submit" data-s="submit" disabled></button>
+    </div>
+    <p class="privacy" data-s="privacy"></p>
+    <ul class="legend">
+      <li><span class="swatch existing-station"></span><span data-s="existingStation"></span></li>
+      <li><span class="swatch existing-corral"></span><span data-s="existingCorral"></span></li>
+      <li><span class="swatch station"></span><span data-s="suggested"></span></li>
+    </ul>
+    <p class="footer" data-s="footer"></p>
+  </aside>
+
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div class="crosshair"></div>
+    <div class="rail">
+      <button type="button" id="locate" data-s-aria="locate">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      </button>
+      <button type="button" id="zoom-in" data-s-aria="zoomIn">+</button>
+      <button type="button" id="zoom-out" data-s-aria="zoomOut">−</button>
+    </div>
+    <button type="button" class="btn primary cta" id="cta"></button>
+    <p class="toast" id="toast" role="status"></p>
+  </div>
+</main>
+
+<dialog id="help-dialog">
+  <h2 data-s="help"></h2>
+  <ol>
+    <li data-s="helpStep1"></li>
+    <li data-s="helpStep2"></li>
+    <li data-s="helpStep3"></li>
+  </ol>
+  <p data-s="helpVote"></p>
+  <p data-s="helpPrivacy"></p>
+  <p><span data-s="helpLinks"></span> <a href="https://www.alexandriava.gov/Bikesharing">Capital Bikeshare</a> · <a href="https://www.alexandriava.gov/DocklessMobility" data-s="dockless"></a></p>
+  <button type="button" class="btn" id="help-close" data-s="close"></button>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

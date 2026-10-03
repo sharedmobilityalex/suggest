@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function staff() {
+      return signedIn() && exists(/databases/$(db)/documents/staff/$(request.auth.uid));
+    }
+
+    // The City of Alexandria, with a little room around the edge.
+    function inCity(d) {
+      return d.lat > 38.78 && d.lat < 38.86 && d.lng > -77.16 && d.lng < -77.03;
+    }
+
+    function validSuggestion(d) {
+      return d.keys().hasOnly(['type', 'lat', 'lng', 'lang', 'source', 'uid', 'votes', 'hidden', 'created'])
+        && d.type in ['station', 'corral']
+        && d.lat is number && d.lng is number && inCity(d)
+        && d.lang in ['en', 'es']
+        && d.source in ['qr', 'web', 'direct']
+        && d.uid == request.auth.uid
+        && d.votes == 1
+        && d.hidden == false
+        && d.created == request.time;
+    }
+
+    match /suggestions/{id} {
+      allow read: if resource.data.hidden == false || staff();
+      allow create: if signedIn() && validSuggestion(request.resource.data);
+      // One vote at a time, recorded under /votes in the same batch.
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes'])
+        && request.resource.data.votes == resource.data.votes + 1
+        && getAfter(/databases/$(db)/documents/votes/$(id + '_' + request.auth.uid)).data.uid == request.auth.uid;
+      allow update: if staff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden']);
+    }
+
+    match /votes/{voteId} {
+      allow read: if staff();
+      allow create: if signedIn()
+        && voteId == request.resource.data.suggestion + '_' + request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /notes/{id} {
+      allow read: if staff();
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 200
+        && getAfter(/databases/$(db)/documents/suggestions/$(id)).data.uid == request.auth.uid;
+    }
+
+    match /staff/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+    }
+  }
+}
