@@ -23,7 +23,9 @@ as a demo that saves nothing.
 
 Only the script's URL is public, and it returns just the type, location and
 vote count of each suggestion. The sheet itself stays private to its owner.
-To take a suggestion off the map, tick its `hidden` cell.
+To take a suggestion off the map, type TRUE in its `hidden` cell. After
+editing the script, publish it again under Deploy, Manage deployments, New
+version; the URL stays the same.
 
 ## URL parameters
 
