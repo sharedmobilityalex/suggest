@@ -49,6 +49,7 @@ function applyStrings() {
   for (const el of document.querySelectorAll('[data-s]')) el.textContent = t(el.dataset.s);
   for (const el of document.querySelectorAll('[data-s-ph]')) el.placeholder = t(el.dataset.sPh);
   for (const el of document.querySelectorAll('[data-s-aria]')) el.setAttribute('aria-label', t(el.dataset.sAria));
+  if (phone.matches) for (const el of document.querySelectorAll('[data-s-phone]')) el.textContent = t(el.dataset.sPhone);
   $('tagline').textContent = t(state.type === 'station' ? 'taglineStation' : 'taglineCorral');
   $('hint').textContent = t(touch ? 'hintTouch' : 'hintMouse');
   $('drop').textContent = t(touch ? 'drop' : 'centre');
@@ -72,11 +73,11 @@ function toast(message, duration = 3000) {
 // Map
 
 const map = L.map('map', { zoomControl: false, attributionControl: false, renderer: L.canvas(), minZoom: 12, maxZoom: 19 });
-L.control.attribution({ prefix: false, position: 'bottomleft' }).addTo(map);
+L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
 
 const street = L.maplibreGL({
   style: STREET_STYLE,
-  attribution: '&copy; <a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  attributionControl: { customAttribution: '<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
 });
 const satellite = L.layerGroup([
   L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19, attribution: '&copy; Esri, Maxar, Earthstar Geographics' }),
