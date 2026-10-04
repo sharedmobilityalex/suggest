@@ -1,13 +1,16 @@
 # Publishes the site, with a fresh copy of the public suggestions in data/suggestions.json so the map
-# can show its dots without waiting on the Google Sheet. Runs on every push and about every 10 minutes.
+# can show its dots without waiting on the Google Sheet. Runs on every push, whenever the sheet script
+# reports a new pin or vote, and hourly as a safety net.
 # GitHub pauses scheduled runs after 60 days without a commit, so the job commits when one is due.
 name: Publish
 
 on:
   push:
     branches: [main]
+  repository_dispatch:
+    types: [sheet-changed]
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -46,7 +49,7 @@ jobs:
           done
           [ -f data/suggestions.json ] || curl -fsS --max-time 30 "$live" -o data/suggestions.json || echo '[]' > data/suggestions.json
           curl -fsS --max-time 30 "$live" -o published.json || echo 'none' > published.json
-          if [ "${{ github.event_name }}" = schedule ] && cmp -s data/suggestions.json published.json; then
+          if [ "${{ github.event_name }}" != push ] && cmp -s data/suggestions.json published.json; then
             echo "unchanged=true" >> "$GITHUB_OUTPUT"
           fi
           rm -f published.json

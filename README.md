@@ -18,21 +18,26 @@ as a demo that saves nothing.
    prompt). That creates the `suggestions` and `votes` tabs.
 2. Deploy, New deployment, type Web app, execute as yourself, access for
    anyone. Copy the web app URL into `config.js`.
-3. `python3 tools/bake_context.py` refreshes the stations, corrals and City
+3. To republish right after each save, create a fine-grained GitHub token for
+   this repository only with Contents: Read and write, add it in Apps Script
+   under Project Settings, Script Properties, as `GITHUB_TOKEN`, then run
+   `testPublish` once from the editor. It should log 204. When the token
+   expires, the hourly refresh keeps working until it is replaced.
+4. `python3 tools/bake_context.py` refreshes the stations, corrals and City
    boundary in `data/context.json` whenever they change.
 
 Only the script's URL is public, and it returns just the type, location and
 vote count of each suggestion. The sheet itself stays private to its owner.
-The script also caps how many pins and votes one device may add in a day,
-and how many arrive in an hour overall; the numbers are in `LIMITS` at the top
-of the script. To take a suggestion off the map, type TRUE in its `hidden` cell. After
+The script caps how many pins and votes arrive in an hour overall; the
+numbers are in `LIMITS` at the top of the script. There are no per-device
+limits. To take a suggestion off the map, type TRUE in its `hidden` cell. After
 editing the script, publish it again under Deploy, Manage deployments, New
 version; the URL stays the same.
 
 ## Publishing
 
-`.github/workflows/publish.yml` publishes the site on every push and about every
-10 minutes. Each run copies the public suggestions from the sheet into
+`.github/workflows/publish.yml` publishes the site on every push, whenever the
+sheet script reports a new pin or vote, and hourly. Each run copies the public suggestions from the sheet into
 `data/suggestions.json`, so the map shows its dots at once and then refreshes
 them from the sheet. GitHub pauses scheduled runs after 60 days without a
 commit, so the workflow adds an empty commit whenever the last one is 45 days

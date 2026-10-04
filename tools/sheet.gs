@@ -4,9 +4,14 @@
 
 const HEADERS = ['id', 'created', 'type', 'lat', 'lng', 'note', 'lang', 'source', 'device', 'votes', 'hidden'];
 
-// Ceilings that keep one device, or a script, from flooding the map. Raise the per-device
-// numbers before an event where many people will share one tablet.
-const LIMITS = { pinsPerDevicePerDay: 25, pinsPerHour: 300, votesPerDevicePerDay: 100, votesPerHour: 1500 };
+// Ceilings on everyone together, to stop a flood. There are no per-device limits, so one
+// shared tablet can serve a whole event.
+const LIMITS = { pinsPerHour: 300, votesPerHour: 1500 };
+
+// After each save the script asks GitHub to republish the site with a fresh copy of the dots.
+// The GitHub key lives in Project Settings > Script Properties as GITHUB_TOKEN; without it,
+// the site's hourly refresh still runs.
+const REPO = 'sharedmobilityalex/suggest';
 
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -27,11 +32,37 @@ function doPost(e) {
   const body = JSON.parse(e.postData.contents);
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
+  let result;
   try {
-    return json(body.action === 'vote' ? vote(body) : add(body));
+    result = body.action === 'vote' ? vote(body) : add(body);
   } finally {
     lock.releaseLock();
   }
+  if (!result.error) publish();
+  return json(result);
+}
+
+// Asks GitHub to run the publish job. A failure here never affects the save.
+function publish() {
+  const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
+  if (!token) return null;
+  try {
+    return UrlFetchApp.fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      payload: JSON.stringify({ event_type: 'sheet-changed' }),
+      muteHttpExceptions: true,
+    }).getResponseCode();
+  } catch (error) {
+    return String(error);
+  }
+}
+
+// Run this once from the editor after saving the key: it approves the script to contact
+// GitHub and reports 204 when the key works.
+function testPublish() {
+  Logger.log(publish());
 }
 
 function add(b) {
@@ -40,20 +71,18 @@ function add(b) {
   if (!['station', 'corral'].includes(b.type) || !inCity(lat, lng)) throw new Error('invalid suggestion');
   const device = text(b.device, 40);
   const suggestions = sheet('suggestions');
-  if (overLimit(suggestions.getDataRange().getValues(), 1, 8, device, LIMITS.pinsPerDevicePerDay, LIMITS.pinsPerHour)) return { error: 'limit' };
+  if (overLimit(suggestions.getDataRange().getValues(), 1, LIMITS.pinsPerHour)) return { error: 'limit' };
   const id = 's' + Utilities.getUuid().slice(0, 8);
   suggestions.appendRow([id, new Date(), b.type, lat, lng, text(b.note, 200), text(b.lang, 2), text(b.source, 6), device, 1, false]);
   return { id, votes: 1 };
 }
 
-// One vote per device per suggestion.
+// Every vote is counted and logged; nothing stops one device from voting again.
 function vote(b) {
   const id = String(b.id);
   const device = text(b.device, 40);
   const votes = sheet('votes');
-  const cast = votes.getDataRange().getValues();
-  if (cast.some((r) => r[0] === id && r[1] === device)) throw new Error('already voted');
-  if (overLimit(cast, 2, 1, device, LIMITS.votesPerDevicePerDay, LIMITS.votesPerHour)) return { error: 'limit' };
+  if (overLimit(votes.getDataRange().getValues(), 2, LIMITS.votesPerHour)) return { error: 'limit' };
   const suggestions = sheet('suggestions');
   const row = suggestions.getDataRange().getValues().findIndex((r) => r[0] === id);
   if (row < 1) throw new Error('unknown suggestion');
@@ -63,13 +92,9 @@ function vote(b) {
   return { votes: n };
 }
 
-// True when this device has used up its day, or everyone together has used up the hour.
-// `created` and `owner` are the columns holding each row's time and device.
-function overLimit(rows, created, owner, device, perDevicePerDay, perHour) {
-  const age = (r) => Date.now() - new Date(r[created]).getTime();
-  const today = rows.filter((r) => r[owner] === device && age(r) < 864e5).length;
-  const thisHour = rows.filter((r) => age(r) < 36e5).length;
-  return today >= perDevicePerDay || thisHour >= perHour;
+// True when everyone together has used up the hour. `created` is the column holding each row's time.
+function overLimit(rows, created, perHour) {
+  return rows.filter((r) => Date.now() - new Date(r[created]).getTime() < 36e5).length >= perHour;
 }
 
 // Text from the public is trimmed, and kept from being read as a spreadsheet formula.

@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=5';
-import { SHEET_URL } from './config.js?v=5';
+import { strings } from './strings.js?v=6';
+import { SHEET_URL } from './config.js?v=6';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -23,7 +23,7 @@ const state = {
   source: pick(params.get('src'), ['qr', 'web'], 'direct'),
   satellite: false,
   pin: null,
-  voted: new Set(remember('voted') || []),
+  voted: new Set(),
 };
 const device = remember('device') || remember('device', crypto.randomUUID());
 const suggestions = [];
@@ -51,7 +51,6 @@ async function call(body) {
   const send = body ? { method: 'POST', body: JSON.stringify({ ...body, device }) } : {};
   const response = await fetch(SHEET_URL, { ...send, signal: AbortSignal.timeout(60000) });
   const text = await response.text();
-  if (/already voted/.test(text)) return {};
   if (/invalid suggestion|unknown suggestion/.test(text)) throw new Error('refused');
   let result;
   try {
@@ -356,10 +355,10 @@ function merge(rows) {
   for (const r of live.values()) addDot(r);
 }
 
-// A suggestion counts as its author's vote, so this is also called when one is saved.
+// A suggestion counts as its author's vote, so this is also called when one is saved. Votes are
+// remembered only until the page reloads, so a tablet shared at an event works for everyone.
 function keepVote(id) {
   state.voted.add(id);
-  remember('voted', [...state.voted]);
 }
 
 // The count changes at once and the sheet catches up; a refused vote is taken back.
