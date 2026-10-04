@@ -29,8 +29,8 @@ as a demo that saves nothing.
 Only the script's URL is public, and it returns just the type, location and
 vote count of each suggestion. The sheet itself stays private to its owner.
 The script caps how many pins and votes arrive in an hour overall; the
-numbers are in `LIMITS` at the top of the script. There are no per-device
-limits. To take a suggestion off the map, type TRUE in its `hidden` cell. After
+numbers are in `LIMITS` at the top of the script. A device may add any
+number of pins but votes once per suggestion. To take a suggestion off the map, type TRUE in its `hidden` cell. After
 editing the script, publish it again under Deploy, Manage deployments, New
 version; the URL stays the same.
 
