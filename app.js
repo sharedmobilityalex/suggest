@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=11';
-import { FIREBASE } from './config.js?v=11';
+import { strings } from './strings.js?v=12';
+import { FIREBASE } from './config.js?v=12';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
