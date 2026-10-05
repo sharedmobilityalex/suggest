@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=8';
-import { SHEET_URL } from './config.js?v=8';
+import { strings } from './strings.js?v=9';
+import { SHEET_URL } from './config.js?v=9';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -316,6 +316,7 @@ function addDot(s) {
   // The map opens the popup on a pointer click. A keyboard press reaches the dot as a click with no detail.
   el.addEventListener('click', (e) => {
     if (e.detail !== 0) return;
+    e.stopPropagation(); // otherwise the map sees the same click and closes the popup at once
     marker.togglePopup();
     popup.getElement()?.querySelector('[data-vote]').focus();
   });
