@@ -4,8 +4,8 @@
 
 const HEADERS = ['id', 'created', 'type', 'lat', 'lng', 'note', 'lang', 'source', 'device', 'votes', 'hidden'];
 
-// Ceilings on everyone together, to stop a flood. A device may add any number of pins,
-// so one shared tablet can serve a whole event, but votes once per suggestion.
+// Ceilings on everyone together, to stop a flood. There are no per-device limits on pins or
+// votes, so one shared tablet can serve a whole event.
 const LIMITS = { pinsPerHour: 300, votesPerHour: 1500 };
 
 // After each save the script asks GitHub to republish the site with a fresh copy of the dots.
@@ -77,14 +77,12 @@ function add(b) {
   return { id, votes: 1 };
 }
 
-// One vote per device per suggestion.
+// Every vote is counted, and logged with the device that cast it.
 function vote(b) {
   const id = String(b.id);
   const device = text(b.device, 40);
   const votes = sheet('votes');
-  const cast = votes.getDataRange().getValues();
-  if (cast.some((r) => r[0] === id && r[1] === device)) throw new Error('already voted');
-  if (overLimit(cast, 2, LIMITS.votesPerHour)) return { error: 'limit' };
+  if (overLimit(votes.getDataRange().getValues(), 2, LIMITS.votesPerHour)) return { error: 'limit' };
   const suggestions = sheet('suggestions');
   const row = suggestions.getDataRange().getValues().findIndex((r) => r[0] === id);
   if (row < 1) throw new Error('unknown suggestion');

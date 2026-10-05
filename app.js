@@ -1,5 +1,5 @@
-import { strings } from './strings.js?v=7';
-import { SHEET_URL } from './config.js?v=7';
+import { strings } from './strings.js?v=8';
+import { SHEET_URL } from './config.js?v=8';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -23,7 +23,6 @@ const state = {
   source: pick(params.get('src'), ['qr', 'web'], 'direct'),
   satellite: false,
   pin: null,
-  voted: new Set(remember('voted') || []),
 };
 const device = remember('device') || remember('device', crypto.randomUUID());
 const suggestions = [];
@@ -51,7 +50,6 @@ async function call(body) {
   const send = body ? { method: 'POST', body: JSON.stringify({ ...body, device }) } : {};
   const response = await fetch(SHEET_URL, { ...send, signal: AbortSignal.timeout(60000) });
   const text = await response.text();
-  if (/already voted/.test(text)) return {};
   if (/invalid suggestion|unknown suggestion/.test(text)) throw new Error('refused');
   let result;
   try {
@@ -234,10 +232,6 @@ function nearby() {
   return closest;
 }
 
-function hasVoted(s) {
-  return s.voted || state.voted.has(s.id);
-}
-
 // Shows where the pin is, and says so when someone has already suggested the same thing next to it.
 let nearRequest = 0;
 async function updateNear() {
@@ -245,7 +239,6 @@ async function updateNear() {
   const { lng, lat } = state.pin.getLngLat();
   const repeat = nearby();
   $('nudge-text').textContent = t(state.type === 'station' ? 'nudgeStation' : 'nudgeCorral');
-  $('nudge-vote').hidden = !repeat || hasVoted(repeat);
   $('nudge').hidden = !repeat;
   const request = ++nearRequest;
   $('near').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
@@ -260,13 +253,11 @@ async function submit(sure) {
   if (!insideCity(lng, lat)) return toast(t('outside'));
   const repeat = nearby();
   if (repeat && sure !== true) {
-    $('sure-vote').hidden = hasVoted(repeat);
     return $('sure').showModal();
   }
   const s = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source, votes: 1 };
   const same = (r) => r.type === s.type && r.lat === s.lat && r.lng === s.lng && !suggestions.some((x) => x.id === r.id);
-  s.saving = save({ action: 'add', ...s }, same).then((saved) => keepVote(s.id = saved.id));
-  s.voted = true;
+  s.saving = save({ action: 'add', ...s }, same).then((saved) => { s.id = saved.id; });
   s.mine = true;
   const dot = addDot(s);
   clearPin();
@@ -288,9 +279,7 @@ async function submit(sure) {
 function voteNearby() {
   const repeat = nearby();
   clearPin();
-  if (!repeat || hasVoted(repeat)) return;
-  vote(repeat);
-  toast(t('voteAdded'));
+  if (repeat) vote(repeat);
 }
 
 // Suggestions already on the map
@@ -315,7 +304,7 @@ function addDot(s) {
     el.innerHTML = s.votes > 1 ? `<b>${s.votes}</b>` : '';
     el.setAttribute('aria-label', describe(s));
     if (!popup.isOpen()) return;
-    popup.setHTML(`<p>${describe(s)}</p><button type="button" class="btn primary" data-vote${hasVoted(s) ? ' disabled' : ''}>${t(hasVoted(s) ? 'voted' : 'meToo')}</button>`);
+    popup.setHTML(`<p>${describe(s)}</p><button type="button" class="btn primary" data-vote>${t('meToo')}</button>`);
     popup.getElement().querySelector('[data-vote]').onclick = () => vote(s);
   };
   popup.on('open', () => {
@@ -356,27 +345,21 @@ function merge(rows) {
   for (const r of live.values()) addDot(r);
 }
 
-// A suggestion counts as its author's vote, so this is also called when one is saved.
-function keepVote(id) {
-  state.voted.add(id);
-  remember('voted', [...state.voted]);
-}
-
-// The count changes at once and the sheet catches up; a refused vote is taken back.
+// Anyone may vote for a spot as often as they like. The count changes at once and the sheet
+// catches up; a refused vote is taken back.
 async function vote(s) {
   const before = s.votes;
-  const mark = (voted) => {
-    s.votes += voted ? 1 : -1;
-    s.voted = voted;
+  const mark = (step) => {
+    s.votes += step;
     s.render();
   };
-  mark(true);
+  mark(1);
+  toast(t('voteAdded'));
   try {
     await s.saving;
     await save({ action: 'vote', id: s.id }, (r) => r.id === s.id && r.votes > before);
-    keepVote(s.id);
   } catch (error) {
-    mark(false);
+    mark(-1);
     sorry(error.message === 'unconfirmed' ? new Error('failed') : error);
   }
 }
