@@ -78,7 +78,7 @@ main.touch:not(.pinned) .crosshair { display: block; }
 .toast { position: absolute; top: 14px; left: 50%; z-index: 1003; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: var(--radius); background: var(--ink); color: #fff; font-size: 14px; opacity: 0; transform: translate(-50%, -8px); transition: opacity 0.2s, transform 0.2s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-/* Markers, popups, credits. A dot is a 24px button around a 16px mark, so it is easy to tap. */
+/* Markers, popups and the credits button. A dot is a 24px button around a 16px mark, so it is easy to tap. */
 .pin { color: var(--station); }
 .pin.corral { color: var(--corral); }
 .pin svg { display: block; width: 30px; height: 40px; overflow: visible; fill: currentColor; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3)); }
@@ -87,13 +87,12 @@ main.touch:not(.pinned) .crosshair { display: block; }
 .dot::before { content: ""; display: block; width: 16px; height: 16px; margin: 4px; border: 2px solid #fff; border-radius: 50%; background: var(--station); box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.55); }
 .dot.corral::before { border-radius: 3px; background: var(--corral); }
 .dot b { position: absolute; top: -5px; left: 13px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--blue-deep); color: #fff; font: 600 11px/17px sans-serif; text-align: center; }
-.credits { position: absolute; right: 8px; bottom: 5px; z-index: 1000; color: var(--ink-2); font-size: 11px; text-align: right; text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; pointer-events: none; }
-.credits a { color: inherit; text-decoration: none; pointer-events: auto; }
-.credits a:hover { text-decoration: underline; }
 .maplibregl-popup-content { padding: 12px 14px; border-radius: var(--radius); font: inherit; font-size: 14px; line-height: 1.4; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2); }
 .maplibregl-popup-content p { margin: 0 0 8px; font-weight: 600; }
 .maplibregl-popup-content .btn { width: 100%; }
 .tip .maplibregl-popup-content { padding: 4px 8px; font-size: 12px; }
+.maplibregl-ctrl-attrib { color: var(--ink-2); font-size: 11px; }
+.maplibregl-ctrl-attrib a { color: inherit; }
 
 /* Dialogs */
 dialog { width: min(440px, calc(100% - 32px)); padding: 24px; border: 0; border-radius: 12px; color: var(--ink); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); }

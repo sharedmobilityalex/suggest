@@ -1,13 +1,10 @@
-import { strings } from './strings.js?v=9';
-import { SHEET_URL } from './config.js?v=9';
+import { strings } from './strings.js?v=11';
+import { FIREBASE } from './config.js?v=11';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
 const GEOCODER = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer';
-const CREDITS = {
-  street: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://www.openmaptiles.org/">OpenMapTiles</a> · <a href="https://openfreemap.org">OpenFreeMap</a>',
-  satellite: '&copy; Esri, Maxar, Earthstar Geographics',
-};
+const CREDITS = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://www.openmaptiles.org/">OpenMapTiles</a> · <a href="https://openfreemap.org">OpenFreeMap</a>';
 const PIN = '<svg viewBox="0 0 30 40"><path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25C30 6.7 23.3 0 15 0z"/><circle cx="15" cy="15" r="6" fill="#fff"/></svg>';
 const NEARBY = 100; // metres: a new pin this close to a suggestion of the same type is treated as a repeat
 
@@ -43,49 +40,64 @@ function remember(key, value) {
   return value ?? null;
 }
 
-// The Google Sheet behind the map (see tools/sheet.gs). Without a URL the page runs as a demo.
-// Apps Script is slow at random and now and then answers with an error page instead of the result,
-// so a call gets a full minute, and only the script's own refusals count as a definite no.
-async function call(body) {
-  const send = body ? { method: 'POST', body: JSON.stringify({ ...body, device }) } : {};
-  const response = await fetch(SHEET_URL, { ...send, signal: AbortSignal.timeout(60000) });
-  const text = await response.text();
-  if (/invalid suggestion|unknown suggestion/.test(text)) throw new Error('refused');
-  let result;
-  try {
-    result = JSON.parse(text);
-  } catch {
-    throw new Error('unreachable');
-  }
-  if (result.error) throw new Error(result.error);
-  return result;
+// Firestore holds the suggestions. The page writes to it directly, and firestore.rules decides what
+// may be written. Without a Firebase apiKey the page runs as a demo that saves nothing.
+const SDK = 'https://www.gstatic.com/firebasejs/12.6.0';
+let db;
+let fs;
+
+async function connect() {
+  if (!FIREBASE.apiKey) return;
+  const [{ initializeApp }, firestore] = await Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-firestore.js`)]);
+  fs = firestore;
+  // The local cache shows the last dots at once on a return visit, and sends saves made offline when
+  // the connection comes back.
+  db = fs.initializeFirestore(initializeApp(FIREBASE), { localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) });
 }
 
-// The public list of suggestions, asked for up to three times.
-async function read() {
-  if (!SHEET_URL) return [];
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await call();
-    } catch (error) {
-      if (attempt === 3) throw error;
+// Keeps the dots in step with Firestore: new suggestions appear, counts change and hidden ones go,
+// as they happen anywhere.
+function listen() {
+  const visible = fs.query(fs.collection(db, 'suggestions'), fs.where('hidden', '==', false));
+  fs.onSnapshot(visible, (snapshot) => {
+    for (const change of snapshot.docChanges()) {
+      const s = { id: change.doc.id, ...change.doc.data() };
+      const shown = suggestions.find((x) => x.id === s.id);
+      if (!shown) {
+        if (change.type !== 'removed') addDot(s);
+      } else if (change.type === 'removed') {
+        shown.marker.remove();
+        suggestions.splice(suggestions.indexOf(shown), 1);
+      } else {
+        shown.votes = s.votes;
+        shown.render();
+      }
     }
-  }
+  });
 }
 
-// A save that seemed to fail may still have reached the sheet, so look before asking anyone to try
-// again: a second try at a pin would leave two of them.
-async function save(body, landed) {
-  if (!SHEET_URL) return { id: String(Date.now()) };
-  try {
-    return await call(body);
-  } catch (error) {
-    if (['refused', 'limit'].includes(error.message)) throw error;
-    const rows = await read().catch(() => null);
-    const row = rows?.find(landed);
-    if (row) return row;
-    throw new Error(rows ? 'failed' : 'unconfirmed');
+// The public part of a suggestion and its private details (note, language, source, device) are saved
+// together. The dot appears at once from the local copy; if the save is refused it disappears again.
+async function add(s, details) {
+  if (!db) return addDot({ ...s, id: String(Date.now()) });
+  const ref = fs.doc(fs.collection(db, 'suggestions'));
+  const batch = fs.writeBatch(db);
+  batch.set(ref, { ...s, created: fs.serverTimestamp() });
+  batch.set(fs.doc(db, 'details', ref.id), { ...details, created: fs.serverTimestamp() });
+  return batch.commit();
+}
+
+// Anyone may vote for a spot as often as they like; each vote is also logged with its device.
+async function vote(s) {
+  toast(t('voteAdded'));
+  if (!db) {
+    s.votes += 1;
+    return s.render();
   }
+  const batch = fs.writeBatch(db);
+  batch.update(fs.doc(db, 'suggestions', s.id), { votes: fs.increment(1) });
+  batch.set(fs.doc(fs.collection(db, 'votes')), { suggestion: s.id, device, created: fs.serverTimestamp() });
+  await batch.commit().catch(() => toast(t('failed')));
 }
 
 // Text
@@ -132,10 +144,6 @@ function toast(message, duration = 5000) {
   toastTimer = setTimeout(() => el.classList.remove('show'), duration);
 }
 
-function sorry(error) {
-  toast(t(['limit', 'unconfirmed'].includes(error.message) ? error.message : 'failed'), 8000);
-}
-
 // Map
 
 function toggleBasemap() {
@@ -147,12 +155,11 @@ function toggleBasemap() {
 
 function labelBasemap() {
   label($('basemap'), t(state.satellite ? 'mapView' : 'satellite'));
-  $('credits').innerHTML = CREDITS[state.satellite ? 'satellite' : 'street'];
 }
 
 async function loadContext() {
   const [ctx] = await Promise.all([fetch('data/context.json').then((r) => r.json()), new Promise((done) => map.once('style.load', done))]);
-  const raster = (path) => ({ type: 'raster', tiles: [`${ESRI}/${path}/MapServer/tile/{z}/{y}/{x}`], tileSize: 256, maxzoom: 19 });
+  const raster = (path) => ({ type: 'raster', tiles: [`${ESRI}/${path}/MapServer/tile/{z}/{y}/{x}`], tileSize: 256, maxzoom: 19, attribution: '&copy; Esri, Maxar, Earthstar Geographics' });
   const place = (lng, lat, kind, name) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: { kind, name } });
   const places = [
     ...ctx.stations.map(([lng, lat, name]) => place(lng, lat, 'station', name)),
@@ -246,32 +253,23 @@ async function updateNear() {
   if (request === nearRequest && result?.address?.Address) $('near').textContent = t('near', { address: result.address.Address });
 }
 
-// A pin beside an existing suggestion needs a second, explicit yes. Otherwise the dot goes on the
-// map at once and the sheet catches up; a refused save puts the pin back.
+// A pin beside an existing suggestion needs a second, explicit yes. A refused save puts the pin back.
 async function submit(sure) {
   const { lng, lat } = state.pin.getLngLat();
   if (!insideCity(lng, lat)) return toast(t('outside'));
-  const repeat = nearby();
-  if (repeat && sure !== true) {
-    return $('sure').showModal();
-  }
-  const s = { type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), note: $('note').value.trim(), lang: state.lang, source: state.source, votes: 1 };
-  const same = (r) => r.type === s.type && r.lat === s.lat && r.lng === s.lng && !suggestions.some((x) => x.id === r.id);
-  s.saving = save({ action: 'add', ...s }, same).then((saved) => { s.id = saved.id; });
-  s.mine = true;
-  const dot = addDot(s);
+  if (nearby() && sure !== true) return $('sure').showModal();
+  const note = $('note').value.trim();
+  const saving = add({ type: state.type, lat: +lat.toFixed(6), lng: +lng.toFixed(6), votes: 1, hidden: false }, { note, lang: state.lang, source: state.source, device });
   clearPin();
   toast(t('added'));
   try {
-    await s.saving;
-  } catch (error) {
-    dot.remove();
-    suggestions.splice(suggestions.indexOf(s), 1);
+    await saving;
+  } catch {
     if (!state.pin) {
       placePin({ lng, lat });
-      $('note').value = s.note;
+      $('note').value = note;
     }
-    sorry(error);
+    toast(t('failed'));
   }
 }
 
@@ -324,45 +322,6 @@ function addDot(s) {
   s.render();
   s.marker = marker;
   suggestions.push(s);
-  return marker;
-}
-
-// The live list replaces the published copy: new dots appear, counts catch up, and dots taken
-// off the map in the sheet go away. Pins added on this page stay until the sheet has them.
-function merge(rows) {
-  if (!rows) return;
-  const live = new Map(rows.map((r) => [r.id, r]));
-  for (const s of [...suggestions]) {
-    const r = live.get(s.id);
-    if (r) {
-      s.votes = Math.max(s.votes, r.votes);
-      s.render();
-      live.delete(s.id);
-    } else if (!s.mine) {
-      s.marker.remove();
-      suggestions.splice(suggestions.indexOf(s), 1);
-    }
-  }
-  for (const r of live.values()) addDot(r);
-}
-
-// Anyone may vote for a spot as often as they like. The count changes at once and the sheet
-// catches up; a refused vote is taken back.
-async function vote(s) {
-  const before = s.votes;
-  const mark = (step) => {
-    s.votes += step;
-    s.render();
-  };
-  mark(1);
-  toast(t('voteAdded'));
-  try {
-    await s.saving;
-    await save({ action: 'vote', id: s.id }, (r) => r.id === s.id && r.votes > before);
-  } catch (error) {
-    mark(-1);
-    sorry(error.message === 'unconfirmed' ? new Error('failed') : error);
-  }
 }
 
 // Address search
@@ -472,13 +431,14 @@ $('types').hidden = state.locked;
 for (const choice of choices) choice.hidden = state.locked && choice.value !== state.type;
 $('main').classList.toggle('touch', touch);
 $('welcome').showModal();
-const published = fetch('data/suggestions.json', { cache: 'no-cache' }).then((r) => r.json()).catch(() => []);
-const live = read().catch(() => null);
+const connecting = connect().catch(() => {});
 
 if (!window.maplibregl) await new Promise((done) => $('gl').addEventListener('load', done));
-map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-77.09, 38.82], zoom: 12, minZoom: 12, maxZoom: 19, attributionControl: false });
+map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-77.09, 38.82], zoom: 12, minZoom: 12, maxZoom: 19, attributionControl: { compact: true, customAttribution: CREDITS } });
 tip = new maplibregl.Popup({ closeButton: false, offset: 8, className: 'tip' });
 context = await loadContext();
+// The credits start folded into their "i" button; a tap opens them.
+document.querySelector('.maplibregl-compact-show .maplibregl-ctrl-attrib-button')?.click();
 map.on('mouseenter', 'places', (e) => { map.getCanvas().style.cursor = 'pointer'; showTip(e.features[0]); });
 map.on('mouseleave', 'places', () => { map.getCanvas().style.cursor = ''; tip.remove(); });
 map.on('click', (e) => {
@@ -489,6 +449,6 @@ map.on('click', (e) => {
 });
 for (const choice of choices) choice.disabled = false;
 $('ask').textContent = t('ask');
-if (!SHEET_URL) toast(t('demo'));
-for (const s of await published) addDot(s);
-merge(await live);
+await connecting;
+if (db) listen();
+else toast(t(FIREBASE.apiKey ? 'failed' : 'demo'));

@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// Anyone may read the visible suggestions, add a suggestion and add votes. Nobody may delete, read the
+// private details or vote log, or change anything else. Staff hide a suggestion by setting hidden to
+// true in the Firebase console, which these rules do not apply to.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function inCity(d) {
+      return d.lat is number && d.lng is number && d.lat > 38.78 && d.lat < 38.86 && d.lng > -77.16 && d.lng < -77.03;
+    }
+
+    // The public part of a suggestion: what, where, and how many votes.
+    match /suggestions/{id} {
+      allow read: if resource.data.hidden == false;
+      allow create: if request.resource.data.keys().hasOnly(['type', 'lat', 'lng', 'votes', 'hidden', 'created'])
+        && request.resource.data.type in ['station', 'corral']
+        && inCity(request.resource.data)
+        && request.resource.data.votes == 1
+        && request.resource.data.hidden == false
+        && request.resource.data.created == request.time
+        && existsAfter(/databases/$(database)/documents/details/$(id));
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes'])
+        && request.resource.data.votes == resource.data.votes + 1;
+    }
+
+    // The note, language, link source and device behind each suggestion, saved with it.
+    match /details/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['note', 'lang', 'source', 'device', 'created'])
+        && request.resource.data.note is string && request.resource.data.note.size() <= 200
+        && request.resource.data.lang in ['en', 'es', 'am', 'ar']
+        && request.resource.data.source in ['qr', 'web', 'direct']
+        && request.resource.data.device is string && request.resource.data.device.size() <= 40
+        && request.resource.data.created == request.time
+        && existsAfter(/databases/$(database)/documents/suggestions/$(id));
+    }
+
+    // One entry per vote, saved with it.
+    match /votes/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['suggestion', 'device', 'created'])
+        && request.resource.data.suggestion is string
+        && exists(/databases/$(database)/documents/suggestions/$(request.resource.data.suggestion))
+        && request.resource.data.device is string && request.resource.data.device.size() <= 40
+        && request.resource.data.created == request.time;
+    }
+  }
+}
